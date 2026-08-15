@@ -1294,7 +1294,7 @@ forward('sideSignOut', 'btnSignOut');
 
 /** Keep the rail's copy of your name and picture in step. */
 function paintSelf() {
-  paintSelf();
+  paintAvatar($('btnMe'), mine);
   paintAvatar($('sideAvatar'), mine);
   $('sideName').textContent = mine?.display_name || 'You';
 }
