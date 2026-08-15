@@ -308,6 +308,7 @@ function norm(r) {
 // the initial query is held here and replayed once the thread is painted.
 let buffered = [];
 let painted = false;
+let everConnected = false;
 
 async function subscribe() {
   await new Promise((resolve) => {
@@ -339,7 +340,13 @@ async function subscribe() {
       // not block the conversation from being read — it only costs live
       // updates, and the initial load still works.
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') return resolve();
+        if (status === 'SUBSCRIBED') {
+          // Reconnecting after a drop means we missed whatever happened in
+          // between, so re-read rather than silently continuing.
+          if (everConnected) catchUp();
+          everConnected = true;
+          return resolve();
+        }
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           console.warn('realtime:', status);
           resolve();
@@ -352,37 +359,141 @@ async function subscribe() {
 
 function applyRow(row) {
   const msg = norm(row);
-  if (byId.has(msg.id)) updateMessage(msg);
-  else {
-    addMessage(msg);
-    lastId = Math.max(lastId, msg.id);
-    if (!msg.mine) {
-      ping();
-      if (document.visibilityState === 'visible') markRead();
-    }
-    if (scrollPinned) scrollDown();
+  if (byId.has(msg.id)) return updateMessage(msg);
+
+  allMsgs.push(msg);
+  addMessage(msg);
+  lastId = Math.max(lastId, msg.id);
+  if (!msg.mine) {
+    ping();
+    if (document.visibilityState === 'visible') markRead();
   }
+  if (scrollPinned) scrollDown();
 }
+
+/* A page at a time, newest first. Reading the oldest N instead would mean
+   that past N messages the app stops showing anything recent. */
+const PAGE = 150;
+
+/** Every message currently held in memory, ascending by id. */
+let allMsgs = [];
+let oldestLoaded = null;
+let loadingOlder = false;
 
 async function loadMessages() {
   const { data, error } = await sb
     .from('messages')
     .select('*')
-    .order('id', { ascending: true })
-    .limit(1000);
+    .order('id', { ascending: false })
+    .limit(PAGE);
 
   if (error) return toast('Could not load the conversation');
 
-  for (const row of data) {
-    addMessage(norm(row));
-    lastId = Math.max(lastId, row.id);
+  const rows = data.reverse(); // back to oldest-first for rendering
+  allMsgs = rows.map(norm);
+  oldestLoaded = allMsgs.length ? allMsgs[0].id : null;
+
+  for (const msg of allMsgs) {
+    addMessage(msg);
+    lastId = Math.max(lastId, msg.id);
   }
+
   painted = true;
   buffered.forEach(applyRow);
   buffered = [];
+  updateOlderButton();
   scrollDown(true);
   markRead();
 }
+
+/** Rebuild the thread from allMsgs, holding the reader's place. */
+function renderThread() {
+  const thread = $('thread');
+  const heightBefore = thread.scrollHeight;
+  const topBefore = thread.scrollTop;
+
+  for (const child of [...thread.children]) {
+    if (child.id !== 'empty' && child.id !== 'olderRow') child.remove();
+  }
+  byId.clear();
+  lastRow = null;
+
+  for (const msg of allMsgs) addMessage(msg);
+
+  // Growth happened above the viewport, so shift down by exactly that much.
+  thread.scrollTop = topBefore + (thread.scrollHeight - heightBefore);
+}
+
+async function loadOlder() {
+  if (loadingOlder || oldestLoaded == null) return;
+  loadingOlder = true;
+  $('olderBtn').textContent = 'Loading…';
+
+  const { data, error } = await sb
+    .from('messages')
+    .select('*')
+    .lt('id', oldestLoaded)
+    .order('id', { ascending: false })
+    .limit(PAGE);
+
+  loadingOlder = false;
+  $('olderBtn').textContent = 'Load earlier messages';
+
+  if (error) return toast('Could not load earlier messages');
+  if (!data.length) {
+    oldestLoaded = null;
+    return updateOlderButton();
+  }
+
+  allMsgs = [...data.reverse().map(norm), ...allMsgs];
+  oldestLoaded = allMsgs[0].id;
+  renderThread();
+  updateOlderButton();
+}
+
+function updateOlderButton() {
+  // Only worth offering once a full page came back — a shorter first page
+  // means we already have the whole conversation.
+  $('olderRow').hidden = oldestLoaded == null || allMsgs.length < PAGE;
+}
+
+$('olderBtn').onclick = loadOlder;
+
+/**
+ * Realtime only pushes what happens while connected. After a sleep, a dropped
+ * socket or a network change, anything sent in between would be missed
+ * entirely, so re-read on the way back.
+ */
+async function catchUp() {
+  if (!chatStarted || document.visibilityState !== 'visible') return;
+
+  const { data, error } = await sb
+    .from('messages')
+    .select('*')
+    .order('id', { ascending: false })
+    .limit(PAGE);
+  if (error || !data) return;
+
+  const rows = data.reverse();
+
+  // More was missed than one page holds — start clean rather than leave a gap.
+  if (rows.length === PAGE && rows[0].id > lastId + 1) {
+    allMsgs = [];
+    byId.clear();
+    lastRow = null;
+    for (const child of [...$('thread').children]) {
+      if (child.id !== 'empty' && child.id !== 'olderRow') child.remove();
+    }
+    lastId = 0;
+    return loadMessages();
+  }
+
+  // Re-applying known rows is how reactions and edits made while away land.
+  rows.forEach(applyRow);
+}
+
+document.addEventListener('visibilitychange', catchUp);
+window.addEventListener('online', catchUp);
 
 /* --------------------------------------------------------- rendering */
 
@@ -588,10 +699,46 @@ function reactionChip(emoji) {
 
 /* ------------------------------------------------------- voice bubble */
 
-/** Media lives in private buckets, so it needs a short-lived signed URL. */
+/* Media lives in private buckets, so it needs a signed URL. Minting a fresh
+   one every time defeats the browser cache — a new URL looks like a new file,
+   so every reload re-downloads every photo. Reuse them until they near
+   expiry, and keep them across reloads, so the cache actually works. */
+
+const SIGNED_TTL = 6 * 3600; // seconds
+const urlCache = new Map();
+
+try {
+  const saved = JSON.parse(localStorage.getItem('vamor.urls') || '{}');
+  for (const [k, v] of Object.entries(saved)) {
+    if (v.expires > Date.now()) urlCache.set(k, v);
+  }
+} catch {
+  /* corrupt or absent — start empty */
+}
+
+let cacheFlush = null;
+function persistUrls() {
+  clearTimeout(cacheFlush);
+  cacheFlush = setTimeout(() => {
+    try {
+      localStorage.setItem('vamor.urls', JSON.stringify(Object.fromEntries(urlCache)));
+    } catch {
+      urlCache.clear(); // quota — drop it rather than wedge
+    }
+  }, 500);
+}
+
 async function signedUrl(bucket, path) {
-  const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, 3600);
+  const key = `${bucket}/${path}`;
+  const hit = urlCache.get(key);
+  // A minute of headroom, so a URL can't expire mid-download.
+  if (hit && hit.expires > Date.now() + 60000) return hit.url;
+
+  const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, SIGNED_TTL);
   if (error) throw error;
+
+  urlCache.set(key, { url: data.signedUrl, expires: Date.now() + SIGNED_TTL * 1000 });
+  persistUrls();
   return data.signedUrl;
 }
 
