@@ -107,6 +107,29 @@ button { cursor: pointer; border: 0; background: none; }
 
 .sub { margin: 0 0 22px; color: var(--muted); font-size: 14px; }
 
+.pick-list { display: grid; gap: 10px; margin-bottom: 4px; }
+
+.pick-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  text-align: left;
+  font-weight: 600;
+  transition: transform 0.12s, border-color 0.15s, box-shadow 0.15s;
+}
+.pick-btn:hover {
+  border-color: var(--accent);
+  box-shadow: 0 8px 22px rgba(255, 77, 125, 0.18);
+}
+.pick-btn:active { transform: translateY(1px); }
+.pick-btn .avatar { width: 38px; height: 38px; font-size: 16px; }
+.pick-btn:nth-child(2) .avatar { background: linear-gradient(140deg, #45b6ff, #6f5bff); }
+
 .field { display: block; text-align: left; margin-bottom: 14px; }
 .field span {
   display: block;

@@ -13,15 +13,17 @@
  */
 window.VAMOR_CONFIG = {
   /**
-   * SHA-256 of the shared passphrase that locks the conversation once you're
-   * signed in. This is a screen lock, not a security boundary: it stops
-   * someone holding your unlocked phone, but anyone reading this file could
-   * bypass the check. Sign-in is what actually keeps strangers out.
+   * The two of you. Tap a name, type that account's password, and you're in —
+   * no email, no link, no code.
    *
-   * To change it:  node -e "console.log(require('crypto').createHash('sha256').update('NEW ONE').digest('hex'))"
-   * To remove it:  set this to '' (empty string).
+   * These emails are the Supabase Auth accounts and must match the rows in
+   * the `members` table. They aren't secret; the passwords never appear here,
+   * they're checked by Supabase.
    */
-  PASSPHRASE_SHA256: 'fc0eb3f2ef3bce789df7e5a09438023e4ae0198cfc8f2f8461f31bd0261214b6',
+  PEOPLE: [
+    { name: 'Myles', email: 'derick.mercado2124@gmail.com', avatar: '💙' },
+    { name: 'Amor', email: 'justeniabatula10@gmail.com', avatar: '💖' },
+  ],
 
   /**
    * Re-lock when the app is hidden — another tab, another app, screen off,

@@ -72,53 +72,66 @@ function authError(msg) {
   el.hidden = !msg;
 }
 
-let pendingEmail = '';
+const PEOPLE = Array.isArray(cfg.PEOPLE) ? cfg.PEOPLE : [];
+let picked = null;
 
-$('emailForm').addEventListener('submit', async (e) => {
+function buildPicker() {
+  const list = $('pickList');
+  list.replaceChildren();
+  for (const person of PEOPLE) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pick-btn';
+
+    const face = document.createElement('span');
+    face.className = 'avatar';
+    face.textContent = person.avatar || '♥';
+    const label = document.createElement('span');
+    label.textContent = person.name;
+
+    btn.append(face, label);
+    btn.onclick = () => {
+      picked = person;
+      $('pwWho').textContent = person.name;
+      $('whoStep').hidden = true;
+      $('pwForm').hidden = false;
+      authError('');
+      $('password').focus();
+    };
+    list.append(btn);
+  }
+}
+buildPicker();
+
+$('pwForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const email = $('email').value.trim().toLowerCase();
-  if (!email) return;
-  const btn = $('emailForm').querySelector('button');
-  btn.disabled = true;
-  btn.textContent = 'Sending…';
-  authError('');
+  if (!picked) return;
 
-  const { error } = await sb.auth.signInWithOtp({
-    email,
-    options: { emailRedirectTo: location.origin },
-  });
-
-  btn.disabled = false;
-  btn.textContent = 'Send me the link';
-  if (error) return authError(error.message);
-
-  pendingEmail = email;
-  $('sentTo').textContent = email;
-  $('emailForm').hidden = true;
-  $('codeForm').hidden = false;
-  $('code').focus();
-});
-
-$('codeForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const token = $('code').value.trim();
-  if (token.length !== 6) return authError('That code should be 6 digits.');
-  const btn = $('codeForm').querySelector('button');
+  const password = $('password').value;
+  const btn = $('pwForm').querySelector('button');
   btn.disabled = true;
   btn.textContent = 'Signing in…';
   authError('');
 
-  const { error } = await sb.auth.verifyOtp({ email: pendingEmail, token, type: 'email' });
+  const { error } = await sb.auth.signInWithPassword({ email: picked.email, password });
 
   btn.disabled = false;
-  btn.textContent = 'Sign in';
-  if (error) return authError(error.message);
+  btn.textContent = 'Come in';
+  if (error) {
+    $('password').select();
+    return authError(
+      /invalid/i.test(error.message) ? 'That password is not right.' : error.message
+    );
+  }
+  $('password').value = '';
   // onAuthStateChange takes it from here.
 });
 
-$('backToEmail').onclick = () => {
-  $('codeForm').hidden = true;
-  $('emailForm').hidden = false;
+$('pwBack').onclick = () => {
+  picked = null;
+  $('pwForm').hidden = true;
+  $('whoStep').hidden = false;
+  $('password').value = '';
   authError('');
 };
 
@@ -134,29 +147,37 @@ $('btnSignOut').onclick = async () => {
    an unlocked phone; it is not a security boundary, since the check runs in
    the browser. Row Level Security is what actually guards the data. */
 
-async function sha256(text) {
-  const bytes = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
+/* The lock re-checks your real account password against Supabase rather than
+   comparing something baked into this file. That makes it an actual check
+   instead of one anybody could read out of the page source. */
 
-const lockRequired = () => !!cfg.PASSPHRASE_SHA256;
-const unlocked = () => sessionStorage.getItem('vamor.unlocked') === cfg.PASSPHRASE_SHA256;
+const lockRequired = () => true;
+const unlocked = () => sessionStorage.getItem('vamor.unlocked') === '1';
 
 $('lockForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const value = $('passphrase').value;
+  const password = $('passphrase').value;
   const err = $('lockError');
+  const btn = $('lockForm').querySelector('.btn-primary');
   err.hidden = true;
+  btn.disabled = true;
+  btn.textContent = 'Unlocking…';
 
-  if ((await sha256(value)) !== cfg.PASSPHRASE_SHA256) {
-    err.textContent = 'That is not it.';
+  const { error } = await sb.auth.signInWithPassword({ email: myEmail, password });
+
+  btn.disabled = false;
+  btn.textContent = 'Unlock';
+
+  if (error) {
+    err.textContent = /invalid/i.test(error.message)
+      ? 'That is not it.'
+      : 'Could not check that — are you online?';
     err.hidden = false;
     $('passphrase').select();
     return;
   }
 
-  sessionStorage.setItem('vamor.unlocked', cfg.PASSPHRASE_SHA256);
+  sessionStorage.setItem('vamor.unlocked', '1');
   $('passphrase').value = '';
   openChat();
 });
@@ -266,8 +287,8 @@ async function start(session) {
 /** Splash is a dead end when something fails, so give it a way out. */
 function stuck(message) {
   show('auth');
-  $('emailForm').hidden = true;
-  $('codeForm').hidden = true;
+  $('whoStep').hidden = true;
+  $('pwForm').hidden = true;
   $('authNote').hidden = false;
   $('authNote').textContent = message;
   $('authError').hidden = false;
@@ -305,8 +326,8 @@ async function startInner(session) {
 
   if (error || !members?.length) {
     show('auth');
-    $('emailForm').hidden = true;
-    $('codeForm').hidden = true;
+    $('whoStep').hidden = true;
+    $('pwForm').hidden = true;
     $('authNote').hidden = false;
     $('authNote').innerHTML =
       `<b>${myEmail}</b> isn't on the list for this conversation.<br />` +
