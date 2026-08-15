@@ -22,6 +22,10 @@ insert into public.members (email, display_name, avatar) values
   ('justeniabatula10@gmail.com', 'Amor',   '💖')
 on conflict (email) do nothing;
 
+-- Profile pictures were added later; the emoji in `avatar` stays as the
+-- fallback until someone uploads one.
+alter table public.members add column if not exists avatar_url text;
+
 -- Is the current caller one of the two of us?
 create or replace function public.is_member()
 returns boolean
@@ -63,16 +67,21 @@ alter table public.messages add column if not exists image_path text;
 alter table public.messages add column if not exists width  int;
 alter table public.messages add column if not exists height int;
 
+-- Picker GIFs are hotlinked from Giphy rather than copied into storage, so
+-- they carry a URL instead of a bucket path.
+alter table public.messages add column if not exists remote_url text;
+
 alter table public.messages drop constraint if exists messages_kind_check;
 alter table public.messages add  constraint messages_kind_check
-  check (kind in ('text', 'voice', 'photo'));
+  check (kind in ('text', 'voice', 'photo', 'gif'));
 
 -- A row always carries exactly the payload its kind promises.
 alter table public.messages drop constraint if exists has_content;
 alter table public.messages add  constraint has_content check (
   (kind = 'text'  and body       is not null) or
   (kind = 'voice' and audio_path is not null) or
-  (kind = 'photo' and image_path is not null)
+  (kind = 'photo' and image_path is not null) or
+  (kind = 'gif'   and remote_url is not null)
 );
 
 -- ------------------------------------------------------------------- RLS

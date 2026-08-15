@@ -19,6 +19,7 @@ const sb = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
 let myId = null; // auth user uuid
 let myEmail = '';
 let myName = '';
+let mine = null; // my row in `members`
 let peer = null; // the other row in `members`
 let room = null; // realtime presence channel
 let peerOnline = false;
@@ -196,12 +197,13 @@ async function start(session) {
     return;
   }
 
-  const mine = members.find((m) => m.email === myEmail);
+  mine = members.find((m) => m.email === myEmail) || null;
   myName = mine?.display_name || 'Me';
   peer = members.find((m) => m.email !== myEmail) || null;
 
   $('peerName').textContent = peer?.display_name || 'Waiting for her…';
-  $('peerAvatar').textContent = peer?.avatar || '♥';
+  paintAvatar($('peerAvatar'), peer);
+  paintAvatar($('btnMe'), mine);
 
   if (lockRequired() && !unlocked()) {
     show('lock');
@@ -239,6 +241,7 @@ function norm(r) {
     duration: r.duration || 0,
     peaks: r.peaks || [],
     imagePath: r.image_path,
+    remoteUrl: r.remote_url,
     width: r.width || 0,
     height: r.height || 0,
     reaction: r.reaction || '',
@@ -391,7 +394,7 @@ function paintBubble(bubble, msg) {
     bubble.append(voiceBody(msg));
     return;
   }
-  if (msg.type === 'photo') {
+  if (msg.type === 'photo' || msg.type === 'gif') {
     bubble.classList.add('photo');
     bubble.append(photoBody(msg));
     return;
@@ -531,12 +534,17 @@ function photoBody(msg) {
     if (scrollPinned) scrollDown();
   };
 
-  signedUrl('photos', msg.imagePath)
-    .then((url) => (img.src = url))
-    .catch(() => {
-      frame.classList.remove('loading');
-      frame.textContent = 'Photo unavailable';
-    });
+  // Picker GIFs are hotlinked; uploads need a signed URL first.
+  if (msg.remoteUrl) {
+    img.src = msg.remoteUrl;
+  } else {
+    signedUrl('photos', msg.imagePath)
+      .then((url) => (img.src = url))
+      .catch(() => {
+        frame.classList.remove('loading');
+        frame.textContent = 'Photo unavailable';
+      });
+  }
 
   img.onclick = (e) => {
     e.stopPropagation();
@@ -645,6 +653,79 @@ async function sendPhoto(file) {
   }
 }
 
+/* --------------------------------------------------- profile pictures */
+
+const AVATAR_PX = 256;
+
+/** Centre-crop to a square so it fills the circle without distortion. */
+async function squareCrop(file) {
+  const bmp = await loadBitmap(file);
+  const side = Math.min(bmp.width, bmp.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = AVATAR_PX;
+  canvas
+    .getContext('2d')
+    .drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, AVATAR_PX, AVATAR_PX);
+  bmp.close?.();
+
+  const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
+  if (!blob) throw new Error('encode failed');
+  return blob;
+}
+
+/** Show a member's picture in a circle, falling back to their emoji. */
+async function paintAvatar(el, member) {
+  if (!member?.avatar_url) {
+    el.textContent = member?.avatar || '♥';
+    return;
+  }
+  try {
+    const url = await signedUrl('photos', member.avatar_url);
+    const img = document.createElement('img');
+    img.alt = member.display_name || '';
+    img.src = url;
+    el.replaceChildren(img);
+  } catch {
+    el.textContent = member?.avatar || '♥';
+  }
+}
+
+$('btnMe').onclick = () => $('avatarInput').click();
+
+$('avatarInput').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file || !file.type.startsWith('image/')) return;
+
+  let blob;
+  try {
+    blob = await squareCrop(file);
+  } catch {
+    return toast('Could not read that picture');
+  }
+
+  // A fresh path each time, so no storage UPDATE policy is needed.
+  const path = `avatars/${myId}/${crypto.randomUUID()}.jpg`;
+  const up = await sb.storage.from('photos').upload(path, blob, { contentType: 'image/jpeg' });
+  if (up.error) return toast('Picture failed to upload');
+
+  const previous = mine?.avatar_url;
+  const { error } = await sb
+    .from('members')
+    .update({ avatar_url: path, updated_at: new Date().toISOString() })
+    .eq('email', myEmail);
+
+  if (error) {
+    sb.storage.from('photos').remove([path]);
+    return toast('Could not save your picture');
+  }
+
+  if (mine) mine.avatar_url = path;
+  paintAvatar($('btnMe'), mine);
+  if (previous) sb.storage.from('photos').remove([previous]); // tidy up the old one
+  toast('Picture updated');
+});
+
 $('btnPhoto').onclick = () => $('fileInput').click();
 $('fileInput').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
@@ -659,6 +740,88 @@ document.addEventListener('paste', (e) => {
   e.preventDefault();
   const file = item.getAsFile();
   if (file) sendPhoto(file);
+});
+
+/* ----------------------------------------------------------- gifs */
+
+/* Picker GIFs are hotlinked from Giphy's CDN rather than copied into storage:
+   they stay animated, cost nothing, and Giphy's assets are public anyway. */
+
+const GIPHY = cfg.GIPHY_API_KEY;
+if (GIPHY) $('btnGif').hidden = false;
+
+let gifTimer = null;
+let gifSeq = 0;
+
+async function loadGifs(query) {
+  const seq = ++gifSeq;
+  const status = $('gifStatus');
+  status.textContent = 'Loading…';
+
+  const endpoint = query
+    ? `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY}&limit=24&rating=pg-13&q=${encodeURIComponent(query)}`
+    : `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY}&limit=24&rating=pg-13`;
+
+  let items;
+  try {
+    const res = await fetch(endpoint);
+    if (!res.ok) throw new Error(res.status);
+    items = (await res.json()).data || [];
+  } catch {
+    if (seq === gifSeq) status.textContent = 'Could not reach Giphy — check the API key.';
+    return;
+  }
+
+  if (seq !== gifSeq) return; // a newer search already came back
+  const grid = $('gifResults');
+  grid.replaceChildren();
+  status.textContent = items.length ? '' : 'Nothing found.';
+
+  for (const g of items) {
+    const preview = g.images?.fixed_width_small || g.images?.fixed_width;
+    const full = g.images?.downsized_medium || g.images?.original;
+    if (!preview?.url || !full?.url) continue;
+
+    const img = document.createElement('img');
+    img.src = preview.url;
+    img.alt = g.title || 'GIF';
+    img.loading = 'lazy';
+    img.onclick = () => sendGif(full);
+    grid.append(img);
+  }
+}
+
+async function sendGif(image) {
+  closeGifPanel();
+  const { error } = await sb.from('messages').insert({
+    sender: myId,
+    sender_name: myName,
+    kind: 'gif',
+    remote_url: image.url,
+    width: Number(image.width) || null,
+    height: Number(image.height) || null,
+  });
+  if (error) toast('GIF failed to send');
+}
+
+function openGifPanel() {
+  $('gifPanel').hidden = false;
+  $('gifSearch').value = '';
+  loadGifs('');
+  if (!matchMedia('(hover: none)').matches) $('gifSearch').focus();
+}
+
+function closeGifPanel() {
+  $('gifPanel').hidden = true;
+  gifSeq++; // abandon any in-flight search
+}
+
+$('btnGif').onclick = () => ($('gifPanel').hidden ? openGifPanel() : closeGifPanel());
+$('gifClose').onclick = closeGifPanel;
+
+$('gifSearch').addEventListener('input', () => {
+  clearTimeout(gifTimer);
+  gifTimer = setTimeout(() => loadGifs($('gifSearch').value.trim()), 350);
 });
 
 /* ---------------------------------------------------------- reactions */
@@ -957,10 +1120,18 @@ function joinRoom() {
     });
 }
 
+let paintedPeerAvatar = null;
+
 function renderPeer() {
   $('peerAvatar').classList.toggle('online', peerOnline);
   $('peerName').textContent = peer?.display_name || 'Waiting for her…';
-  if (peer?.avatar) $('peerAvatar').textContent = peer.avatar;
+
+  // Presence syncs often; only re-sign the URL when the picture actually changes.
+  const key = peer ? `${peer.avatar_url || ''}|${peer.avatar || ''}` : '';
+  if (key !== paintedPeerAvatar) {
+    paintedPeerAvatar = key;
+    paintAvatar($('peerAvatar'), peer);
+  }
 
   const status = $('peerStatus');
   status.classList.toggle('on', peerOnline);
@@ -985,8 +1156,8 @@ function ago(t) {
 function renderReceipt() {
   document.querySelector('.receipt')?.remove();
   if (!peer?.last_read) return;
-  const mine = [...byId.values()].filter((e) => e.msg.mine);
-  const last = mine[mine.length - 1];
+  const sent = [...byId.values()].filter((e) => e.msg.mine);
+  const last = sent[sent.length - 1];
   if (!last || peer.last_read < last.msg.id) return;
   const d = document.createElement('div');
   d.className = 'receipt';
