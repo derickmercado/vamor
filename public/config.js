@@ -42,7 +42,7 @@ window.VAMOR_CONFIG = {
    * Recording and media playback hold it off, so a long voice note or video
    * won't lock mid-way.
    */
-  IDLE_LOCK_SECONDS: 15,
+  IDLE_LOCK_SECONDS: 60,
 
   /**
    * Giphy API key, for the GIF search button. Free: sign in at
