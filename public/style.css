@@ -92,10 +92,8 @@ button { cursor: pointer; border: 0; background: none; }
   text-align: center;
 }
 
-.login-mark { font-size: 46px; line-height: 1; }
-
 .login-card h1 {
-  margin: 10px 0 2px;
+  margin: 0 0 2px;
   font-size: clamp(22px, 7.5vw, 30px);
   overflow-wrap: break-word;
   letter-spacing: -0.02em;
