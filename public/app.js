@@ -61,7 +61,7 @@ $('input').addEventListener('focus', () => setTimeout(() => scrollDown(true), 25
 /* ---------------------------------------------------------------- auth */
 
 const show = (id) => {
-  for (const s of ['splash', 'auth', 'chat']) $(s).hidden = s !== id;
+  for (const s of ['splash', 'auth', 'lock', 'chat']) $(s).hidden = s !== id;
 };
 
 function authError(msg) {
@@ -126,6 +126,44 @@ $('btnSignOut').onclick = async () => {
   location.reload();
 };
 
+/* ---------------------------------------------------------------- lock */
+
+/* A screen lock over an already-signed-in session. It stops someone holding
+   an unlocked phone; it is not a security boundary, since the check runs in
+   the browser. Row Level Security is what actually guards the data. */
+
+async function sha256(text) {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+const lockRequired = () => !!cfg.PASSPHRASE_SHA256;
+const unlocked = () => sessionStorage.getItem('vamor.unlocked') === cfg.PASSPHRASE_SHA256;
+
+$('lockForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const value = $('passphrase').value;
+  const err = $('lockError');
+  err.hidden = true;
+
+  if ((await sha256(value)) !== cfg.PASSPHRASE_SHA256) {
+    err.textContent = 'That is not it.';
+    err.hidden = false;
+    $('passphrase').select();
+    return;
+  }
+
+  sessionStorage.setItem('vamor.unlocked', cfg.PASSPHRASE_SHA256);
+  $('passphrase').value = '';
+  openChat();
+});
+
+$('lockSignOut').onclick = async () => {
+  await sb.auth.signOut();
+  location.reload();
+};
+
 /* ---------------------------------------------------------------- boot */
 
 sb.auth.onAuthStateChange((event, session) => {
@@ -165,7 +203,21 @@ async function start(session) {
   $('peerName').textContent = peer?.display_name || 'Waiting for her…';
   $('peerAvatar').textContent = peer?.avatar || '♥';
 
+  if (lockRequired() && !unlocked()) {
+    show('lock');
+    $('passphrase').focus();
+    return;
+  }
+  await openChat();
+}
+
+let chatStarted = false;
+
+async function openChat() {
   show('chat');
+  if (chatStarted) return;
+  chatStarted = true;
+
   await subscribe();
   await loadMessages();
   joinRoom();
@@ -186,6 +238,9 @@ function norm(r) {
     audioPath: r.audio_path,
     duration: r.duration || 0,
     peaks: r.peaks || [],
+    imagePath: r.image_path,
+    width: r.width || 0,
+    height: r.height || 0,
     reaction: r.reaction || '',
     deleted: !!r.deleted,
     at: new Date(r.created_at).getTime(),
@@ -328,11 +383,17 @@ function paintBubble(bubble, msg) {
   bubble.classList.toggle('deleted', msg.deleted);
 
   if (msg.deleted) {
+    bubble.classList.remove('photo');
     bubble.textContent = msg.mine ? 'You unsent a message' : 'Unsent a message';
     return;
   }
   if (msg.type === 'voice') {
     bubble.append(voiceBody(msg));
+    return;
+  }
+  if (msg.type === 'photo') {
+    bubble.classList.add('photo');
+    bubble.append(photoBody(msg));
     return;
   }
   bubble.textContent = msg.text;
@@ -371,9 +432,9 @@ function reactionChip(emoji) {
 
 /* ------------------------------------------------------- voice bubble */
 
-/** Clips live in a private bucket, so playback needs a short-lived signed URL. */
-async function signedUrl(path) {
-  const { data, error } = await sb.storage.from('voice').createSignedUrl(path, 3600);
+/** Media lives in private buckets, so it needs a short-lived signed URL. */
+async function signedUrl(bucket, path) {
+  const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, 3600);
   if (error) throw error;
   return data.signedUrl;
 }
@@ -409,7 +470,7 @@ function voiceBody(msg) {
 
   async function ensureAudio() {
     if (audio) return audio;
-    audio = new Audio(await signedUrl(msg.audioPath));
+    audio = new Audio(await signedUrl('voice', msg.audioPath));
     audio.preload = 'auto';
     audio.onplay = () => (play.textContent = '❚❚');
     audio.onpause = () => (play.textContent = '▶');
@@ -451,6 +512,154 @@ function voiceBody(msg) {
   wrap.append(play, wave, dur);
   return wrap;
 }
+
+/* ------------------------------------------------------- photo bubble */
+
+function photoBody(msg) {
+  const frame = document.createElement('div');
+  frame.className = 'frame loading';
+  // Hold the right shape before the bytes arrive, so the thread doesn't jump.
+  if (msg.width && msg.height) frame.style.aspectRatio = `${msg.width} / ${msg.height}`;
+
+  const img = document.createElement('img');
+  img.alt = 'photo';
+  img.loading = 'lazy';
+  img.decoding = 'async';
+  img.onload = () => {
+    frame.classList.remove('loading');
+    frame.style.aspectRatio = '';
+    if (scrollPinned) scrollDown();
+  };
+
+  signedUrl('photos', msg.imagePath)
+    .then((url) => (img.src = url))
+    .catch(() => {
+      frame.classList.remove('loading');
+      frame.textContent = 'Photo unavailable';
+    });
+
+  img.onclick = (e) => {
+    e.stopPropagation();
+    $('lightboxImg').src = img.src;
+    $('lightbox').hidden = false;
+  };
+
+  frame.append(img);
+  return frame;
+}
+
+$('lightbox').onclick = () => {
+  $('lightbox').hidden = true;
+  $('lightboxImg').removeAttribute('src');
+};
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('lightbox').hidden) $('lightbox').click();
+});
+
+/* --------------------------------------------------------- send photo */
+
+const MAX_DIM = 1600;
+
+/**
+ * Phone photos are 4–8MB, which is slow to send and eats the free storage
+ * tier. Re-encode to something that still looks good on a phone screen.
+ * GIFs pass through untouched so they keep animating.
+ */
+async function shrink(file) {
+  if (file.type === 'image/gif' && file.size < 4e6) {
+    const probe = await loadBitmap(file);
+    return { blob: file, width: probe.width, height: probe.height, type: file.type };
+  }
+
+  const bmp = await loadBitmap(file);
+  const scale = Math.min(1, MAX_DIM / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * scale);
+  const h = Math.round(bmp.height * scale);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
+  bmp.close?.();
+
+  const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.82));
+  if (!blob) throw new Error('encode failed');
+  return { blob, width: w, height: h, type: 'image/jpeg' };
+}
+
+/** createImageBitmap where available, <img> everywhere else. */
+async function loadBitmap(file) {
+  if (window.createImageBitmap) {
+    try {
+      return await createImageBitmap(file);
+    } catch {
+      /* HEIC and friends — fall through */
+    }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    await new Promise((res, rej) => {
+      img.onload = res;
+      img.onerror = rej;
+      img.src = url;
+    });
+    return img;
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+}
+
+async function sendPhoto(file) {
+  if (!file || !file.type.startsWith('image/')) return toast('That is not an image');
+  if (file.size > 25e6) return toast('That picture is too big');
+
+  let shrunk;
+  try {
+    shrunk = await shrink(file);
+  } catch {
+    return toast('Could not read that picture');
+  }
+
+  const ext = shrunk.type === 'image/gif' ? 'gif' : 'jpg';
+  const path = `${myId}/${crypto.randomUUID()}.${ext}`;
+
+  const up = await sb.storage.from('photos').upload(path, shrunk.blob, {
+    contentType: shrunk.type,
+    upsert: false,
+  });
+  if (up.error) return toast('Picture failed to upload');
+
+  const { error } = await sb.from('messages').insert({
+    sender: myId,
+    sender_name: myName,
+    kind: 'photo',
+    image_path: path,
+    width: shrunk.width,
+    height: shrunk.height,
+  });
+
+  if (error) {
+    sb.storage.from('photos').remove([path]);
+    toast('Picture failed to send');
+  }
+}
+
+$('btnPhoto').onclick = () => $('fileInput').click();
+$('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = ''; // let the same file be picked twice
+  if (file) await sendPhoto(file);
+});
+
+// Paste a screenshot straight into the conversation.
+document.addEventListener('paste', (e) => {
+  const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
+  if (!item) return;
+  e.preventDefault();
+  const file = item.getAsFile();
+  if (file) sendPhoto(file);
+});
 
 /* ---------------------------------------------------------- reactions */
 
@@ -497,6 +706,7 @@ async function unsend(msg) {
   // Best effort — the row is already marked, so a failure here just leaves an
   // orphaned file that nothing links to.
   if (msg.audioPath) sb.storage.from('voice').remove([msg.audioPath]);
+  if (msg.imagePath) sb.storage.from('photos').remove([msg.imagePath]);
 }
 
 /* ------------------------------------------------------------- toast */

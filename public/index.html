@@ -55,6 +55,23 @@
   </div>
 </div>
 
+<!-- ------------------------------------------------------------- lock -->
+<div id="lock" class="screen" hidden>
+  <form id="lockForm" class="login-card">
+    <div class="login-mark">🔒</div>
+    <h1>Locked</h1>
+    <p class="sub">Enter the passphrase to open the conversation.</p>
+    <label class="field">
+      <span>Passphrase</span>
+      <input id="passphrase" type="password" autocomplete="off"
+             autocapitalize="off" spellcheck="false" placeholder="••••••••" required />
+    </label>
+    <button type="submit" class="btn-primary">Unlock</button>
+    <button type="button" id="lockSignOut" class="btn-link">Sign out instead</button>
+    <p id="lockError" class="error" hidden></p>
+  </form>
+</div>
+
 <!-- ----------------------------------------------------------- chat -->
 <div id="chat" class="screen" hidden>
   <header class="topbar">
@@ -88,6 +105,10 @@
   </div>
 
   <footer class="composer">
+    <button id="btnPhoto" class="attach-btn" title="Send a picture" aria-label="Send a picture">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm0 2v10.6l3.7-3.7a1 1 0 0 1 1.4 0l3 3 2.3-2.3a1 1 0 0 1 1.4 0L19 14.6V5H5Zm4.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg>
+    </button>
+    <input id="fileInput" type="file" accept="image/*" hidden />
     <input id="input" type="text" placeholder="Write something…" autocomplete="off" maxlength="4000" />
     <button id="btnSend" class="send-btn" title="Send" aria-label="Send">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2z"/></svg>
@@ -107,6 +128,11 @@
   <button data-e="👍">👍</button>
   <button data-e="🔥">🔥</button>
   <button data-e="" class="clear">✕</button>
+</div>
+
+<!-- full-size photo viewer -->
+<div id="lightbox" class="lightbox" hidden>
+  <img id="lightboxImg" alt="" />
 </div>
 
 <div id="toast" class="toast" hidden></div>

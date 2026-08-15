@@ -70,7 +70,9 @@ button { cursor: pointer; border: 0; background: none; }
 [hidden] { display: none !important; }
 
 /* ------------------------------------------------------------- login */
-#auth {
+.login-mark { font-size: 40px; line-height: 1; margin-bottom: 10px; }
+
+#auth, #lock {
   align-items: center;
   justify-content: center;
   overflow-y: auto;
@@ -402,6 +404,86 @@ button { cursor: pointer; border: 0; background: none; }
   flex: none;
 }
 
+/* ------------------------------------------------------- photo bubble */
+
+/* The image is the bubble — no padding, no gradient behind it. */
+.row .bubble.photo {
+  padding: 3px;
+  background: var(--them);
+  max-width: min(66%, 300px);
+  /* Text bubbles honour newlines; a photo bubble must not turn stray
+     whitespace between its child nodes into blank lines. */
+  white-space: normal;
+  font-size: 0;
+}
+.row.out .bubble.photo { background: linear-gradient(100deg, var(--me-1), var(--me-2)); }
+
+/* Tall phone photos would otherwise eat the whole screen. Crop them in the
+   thread; tapping opens the uncropped original in the lightbox. */
+.photo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 360px;
+  object-fit: cover;
+  border-radius: 17px;
+  cursor: zoom-in;
+  background: var(--panel-2);
+}
+
+/* Reserve the right box before the image loads so the thread doesn't jump. */
+.photo .frame {
+  position: relative;
+  overflow: hidden;
+  max-height: 360px;
+  border-radius: 17px;
+  background: var(--panel-2);
+}
+.photo .frame.loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.12) 50%, transparent 80%);
+  animation: shimmer 1.2s infinite;
+}
+@keyframes shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+.upload-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.85);
+  margin: 4px 6px 2px;
+  transform-origin: left;
+  animation: grow 8s ease-out forwards;
+}
+@keyframes grow {
+  from { transform: scaleX(0.05); }
+  to { transform: scaleX(1); }
+}
+
+/* --------------------------------------------------------- lightbox */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(6, 8, 16, 0.94);
+  cursor: zoom-out;
+  animation: fade 0.15s ease-out;
+}
+.lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 10px;
+  object-fit: contain;
+}
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
 /* ------------------------------------------------------------ typing */
 .typing-row { padding: 0 14px 6px; }
 .typing-bubble {
@@ -463,6 +545,20 @@ button { cursor: pointer; border: 0; background: none; }
   user-select: none;
   -webkit-user-select: none;
 }
+.attach-btn {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  transition: background 0.15s, color 0.15s, transform 0.12s;
+}
+.attach-btn svg { width: 22px; height: 22px; pointer-events: none; }
+.attach-btn:hover { background: var(--panel-2); color: var(--accent); }
+.attach-btn:active { transform: scale(0.92); }
+
 .send-btn svg, .mic-btn svg { width: 21px; height: 21px; pointer-events: none; }
 .send-btn svg { margin-left: 2px; }
 .send-btn:active, .mic-btn:active { transform: scale(0.93); }
@@ -574,5 +670,5 @@ button { cursor: pointer; border: 0; background: none; }
   .avatar { width: 32px; height: 32px; font-size: 14px; }
   .thread { padding-top: 8px; }
   .composer { padding-block: 6px; }
-  .send-btn, .mic-btn { width: 40px; height: 40px; }
+  .send-btn, .mic-btn, .attach-btn { width: 40px; height: 40px; }
 }

@@ -42,23 +42,38 @@ create table if not exists public.messages (
   id          bigint generated always as identity primary key,
   sender      uuid not null default auth.uid() references auth.users(id) on delete cascade,
   sender_name text not null,
-  kind        text not null check (kind in ('text', 'voice')),
+  kind        text not null,
   body        text,
   audio_path  text,
   duration    real,
   peaks       real[],
+  image_path  text,
+  width       int,
+  height      int,
   reaction    text,
   deleted     boolean not null default false,
-  created_at  timestamptz not null default now(),
-
-  -- A row is either words or a voice clip, never neither.
-  constraint has_content check (
-    (kind = 'text'  and body is not null) or
-    (kind = 'voice' and audio_path is not null)
-  )
+  created_at  timestamptz not null default now()
 );
 
 create index if not exists messages_created_idx on public.messages (id);
+
+-- Photo support was added after the first version, so bring older projects
+-- forward. These are no-ops on a fresh install.
+alter table public.messages add column if not exists image_path text;
+alter table public.messages add column if not exists width  int;
+alter table public.messages add column if not exists height int;
+
+alter table public.messages drop constraint if exists messages_kind_check;
+alter table public.messages add  constraint messages_kind_check
+  check (kind in ('text', 'voice', 'photo'));
+
+-- A row always carries exactly the payload its kind promises.
+alter table public.messages drop constraint if exists has_content;
+alter table public.messages add  constraint has_content check (
+  (kind = 'text'  and body       is not null) or
+  (kind = 'voice' and audio_path is not null) or
+  (kind = 'photo' and image_path is not null)
+);
 
 -- ------------------------------------------------------------------- RLS
 
@@ -141,3 +156,25 @@ create policy "members upload voice"
 create policy "members delete voice"
   on storage.objects for delete
   using (bucket_id = 'voice' and owner = auth.uid());
+
+-- Same deal for photos: private bucket, signed URLs only.
+
+insert into storage.buckets (id, name, public)
+values ('photos', 'photos', false)
+on conflict (id) do nothing;
+
+drop policy if exists "members read photos"   on storage.objects;
+drop policy if exists "members upload photos" on storage.objects;
+drop policy if exists "members delete photos" on storage.objects;
+
+create policy "members read photos"
+  on storage.objects for select
+  using (bucket_id = 'photos' and public.is_member());
+
+create policy "members upload photos"
+  on storage.objects for insert
+  with check (bucket_id = 'photos' and public.is_member());
+
+create policy "members delete photos"
+  on storage.objects for delete
+  using (bucket_id = 'photos' and owner = auth.uid());
