@@ -110,6 +110,17 @@ insert into public.room (id) values (1) on conflict (id) do nothing;
 -- How strongly the background picture is dimmed, so bubbles stay readable.
 alter table public.room add column if not exists bg_dim real not null default 0.45;
 
+-- ------------------------------------------------------------ push subs
+-- One row per browser that agreed to notifications. The Edge Function reads
+-- these with the service role; neither of you can read the other's.
+
+create table if not exists public.push_subs (
+  endpoint   text primary key,
+  email      text not null,
+  sub        jsonb not null,
+  created_at timestamptz not null default now()
+);
+
 -- --------------------------------------------------------------- guardrail
 -- Reactions require letting each of you update the other's messages, but that
 -- must not extend to rewriting what the other person said. Anything except
@@ -153,9 +164,28 @@ create trigger guard_message_update
 
 -- ------------------------------------------------------------------- RLS
 
-alter table public.members  enable row level security;
-alter table public.messages enable row level security;
-alter table public.room     enable row level security;
+alter table public.members   enable row level security;
+alter table public.messages  enable row level security;
+alter table public.room      enable row level security;
+alter table public.push_subs enable row level security;
+
+drop policy if exists "own push subs"    on public.push_subs;
+drop policy if exists "add push sub"     on public.push_subs;
+drop policy if exists "drop own push sub" on public.push_subs;
+
+-- Your own devices only. The sender never sees where the other person's
+-- notifications go.
+create policy "own push subs"
+  on public.push_subs for select
+  using (email = auth.jwt() ->> 'email');
+
+create policy "add push sub"
+  on public.push_subs for insert
+  with check (email = auth.jwt() ->> 'email');
+
+create policy "drop own push sub"
+  on public.push_subs for delete
+  using (email = auth.jwt() ->> 'email');
 
 drop policy if exists "members read room"   on public.room;
 drop policy if exists "members update room" on public.room;

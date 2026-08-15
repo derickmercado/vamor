@@ -343,6 +343,7 @@ async function openChat() {
   await loadMessages();
   joinRoom();
   heartbeat();
+  checkPush();
   $('input').focus();
 }
 
@@ -1061,6 +1062,7 @@ async function sendVideo(file) {
     reply_to: takeReply(),
   });
 
+  if (!error) notifyPeer();
   if (error) {
     sb.storage.from('videos').remove([path]);
     if (posterPath) sb.storage.from('photos').remove([posterPath]);
@@ -1202,7 +1204,7 @@ async function sendPhoto(file) {
   if (error) {
     sb.storage.from('photos').remove([path]);
     toast('Picture failed to send');
-  }
+  } else notifyPeer();
 }
 
 /* --------------------------------------------------- profile pictures */
@@ -1587,6 +1589,7 @@ async function sendGif(image) {
     reply_to: takeReply(),
   });
   if (error) toast('GIF failed to send');
+  else notifyPeer();
 }
 
 function openGifPanel() {
@@ -1796,7 +1799,7 @@ async function sendText() {
     $('input').value = text;
     if (parent) startReply(parent);
     toast('Not sent — check the connection');
-  }
+  } else notifyPeer();
 }
 
 $('btnSend').onclick = sendText;
@@ -1952,7 +1955,7 @@ async function finishRecording() {
   if (error) {
     sb.storage.from('voice').remove([path]);
     toast('Voice mail failed to send');
-  }
+  } else notifyPeer();
 }
 
 /** Downsample the clip to 34 bars so the bubble shows a real waveform. */
@@ -2097,6 +2100,116 @@ function heartbeat() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') markRead();
 });
+
+/* --------------------------------------------------- push notifications */
+
+/* The in-page Notification only fires while the app is running. Real push
+   goes through a service worker, so her phone buzzes with the app closed. */
+
+const VAPID = cfg.VAPID_PUBLIC_KEY;
+
+const pushSupported = () =>
+  !!VAPID && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+/** VAPID keys travel as base64url; PushManager wants raw bytes. */
+function vapidBytes(base64url) {
+  const padded = (base64url + '='.repeat((4 - (base64url.length % 4)) % 4))
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+  const raw = atob(padded);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+let swReg = null;
+
+async function registerWorker() {
+  if (!pushSupported()) return null;
+  try {
+    swReg = await navigator.serviceWorker.register('/sw.js');
+    return swReg;
+  } catch (err) {
+    console.warn('service worker failed', err);
+    return null;
+  }
+}
+
+/** Needs a user gesture on most platforms, so this hangs off a button. */
+async function enablePush() {
+  if (!pushSupported()) {
+    return toast('This browser cannot do notifications');
+  }
+
+  const reg = swReg || (await registerWorker());
+  if (!reg) return toast('Could not start notifications');
+
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') {
+    return toast(
+      permission === 'denied'
+        ? 'Notifications are blocked in your browser settings'
+        : 'Notifications not enabled'
+    );
+  }
+
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: vapidBytes(VAPID),
+    });
+  }
+
+  const { error } = await sb
+    .from('push_subs')
+    .upsert({ endpoint: sub.endpoint, email: myEmail, sub: sub.toJSON() }, { onConflict: 'endpoint' });
+
+  if (error) return toast('Could not save notifications');
+  pushOn = true;
+  paintPushButton();
+  toast('Notifications on');
+}
+
+async function disablePush() {
+  const reg = swReg || (await navigator.serviceWorker.getRegistration());
+  const sub = reg && (await reg.pushManager.getSubscription());
+  if (sub) {
+    await sb.from('push_subs').delete().eq('endpoint', sub.endpoint);
+    await sub.unsubscribe();
+  }
+  pushOn = false;
+  paintPushButton();
+  toast('Notifications off');
+}
+
+let pushOn = false;
+
+function paintPushButton() {
+  const label = pushOn ? 'Notifications are on' : 'Turn on notifications';
+  $('pushLabel').textContent = label;
+  $('pushBtn').classList.toggle('on', pushOn);
+  // The rail copy exists on desktop only.
+  $('sidePush').lastChild.textContent = pushOn ? 'Notifications on' : 'Turn on notifications';
+}
+
+/** Is this device already subscribed? */
+async function checkPush() {
+  if (!pushSupported() || Notification.permission !== 'granted') return paintPushButton();
+  const reg = await registerWorker();
+  const sub = reg && (await reg.pushManager.getSubscription());
+  pushOn = !!sub;
+  paintPushButton();
+}
+
+$('pushBtn').onclick = () => (pushOn ? disablePush() : enablePush());
+$('sidePush').onclick = () => $('pushBtn').click();
+
+/** Ask the Edge Function to buzz the other person. Never blocks sending. */
+function notifyPeer() {
+  if (!VAPID) return;
+  sb.functions.invoke('notify').catch(() => {
+    /* the message is already delivered; a missed buzz is not worth a toast */
+  });
+}
 
 /** A soft chime for incoming messages — no audio files needed. */
 function ping() {

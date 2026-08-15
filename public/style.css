@@ -688,6 +688,23 @@ button { cursor: pointer; border: 0; background: none; }
 .profile-fields .field { margin-bottom: 4px; }
 .profile-fields .btn-link { text-align: left; width: auto; margin: 0; padding: 2px 0; }
 
+.push-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 14px;
+  text-align: left;
+  transition: border-color 0.15s, color 0.15s;
+}
+.push-row:hover { border-color: var(--accent); }
+.push-row.on { color: #2fd27b; border-color: #2fd27b; }
+
 .swatches {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));

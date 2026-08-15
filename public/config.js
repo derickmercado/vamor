@@ -45,6 +45,14 @@ window.VAMOR_CONFIG = {
   IDLE_LOCK_SECONDS: 60,
 
   /**
+   * Public half of the VAPID keypair, for push notifications. Safe to ship —
+   * it only identifies the sender. The private half lives in the Supabase
+   * Edge Function's secrets and must never appear here.
+   * Empty disables push entirely.
+   */
+  VAPID_PUBLIC_KEY: 'BLgiomYUR_DfwkAH1fqc5DM-tmMpiJhYnHFDgegkYwS-uiQ9JVlMnFGd0fgFWxpG9AWBIXzcCUe4kHyneZ4hT-4',
+
+  /**
    * Giphy API key, for the GIF search button. Free: sign in at
    * developers.giphy.com, "Create an App", pick the API option, copy the key.
    * Leave it empty and the GIF button simply doesn't appear — you can still
