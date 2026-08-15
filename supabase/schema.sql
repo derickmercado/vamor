@@ -102,6 +102,9 @@ create table if not exists public.room (
 
 insert into public.room (id) values (1) on conflict (id) do nothing;
 
+-- How strongly the background picture is dimmed, so bubbles stay readable.
+alter table public.room add column if not exists bg_dim real not null default 0.45;
+
 -- --------------------------------------------------------------- guardrail
 -- Reactions require letting each of you update the other's messages, but that
 -- must not extend to rewriting what the other person said. Anything except

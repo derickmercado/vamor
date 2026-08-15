@@ -40,6 +40,7 @@ $('btnTheme').onclick = () => {
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = next;
   localStorage.setItem('vamor.theme', next);
+  applyRoom(); // the background veil is palette-dependent
 };
 
 /* ------------------------------------------------- mobile viewport */
@@ -386,7 +387,19 @@ function addMessage(msg) {
     bubble.addEventListener(ev, () => clearTimeout(hold))
   );
 
-  row.append(msg.mine ? time : bubble, msg.mine ? bubble : time);
+  // Desktop affordance for the menu that long-press/right-click gives on phone.
+  const more = document.createElement('button');
+  more.className = 'more-btn';
+  more.title = 'More';
+  more.setAttribute('aria-label', 'Message actions');
+  more.textContent = '⋯';
+  more.onclick = (e) => {
+    e.stopPropagation();
+    openReactions(e, msg);
+  };
+
+  if (msg.mine) row.append(more, time, bubble);
+  else row.append(bubble, time, more);
 
   // Group by sender id, not name — names are editable.
   row.dataset.from = msg.senderId;
@@ -867,22 +880,31 @@ function applyRoom() {
   [...$('swatches').children].forEach((s) => s.classList.toggle('on', s.dataset.id === look.theme));
   $('bgClear').hidden = !look.bg_path;
 
-  const thread = $('thread');
+  $('dim').value = look.bg_dim ?? 0.45;
+  $('dimRow').hidden = !look.bg_path;
+
+  const shell = $('chat');
   if (!look.bg_path) {
-    thread.style.backgroundImage = '';
-    thread.classList.remove('has-bg');
+    shell.style.backgroundImage = '';
+    shell.classList.remove('has-bg');
     return;
   }
   signedUrl('photos', look.bg_path)
     .then((url) => {
-      const veil = 'var(--veil)';
-      thread.style.backgroundImage = `linear-gradient(${veil}, ${veil}), url("${url}")`;
-      thread.classList.add('has-bg');
+      shell.style.backgroundImage = `linear-gradient(${veilColor()}, ${veilColor()}), url("${url}")`;
+      shell.classList.add('has-bg');
     })
     .catch(() => {
-      thread.style.backgroundImage = '';
-      thread.classList.remove('has-bg');
+      shell.style.backgroundImage = '';
+      shell.classList.remove('has-bg');
     });
+}
+
+/** The veil has to match the current light/dark palette, not a fixed colour. */
+function veilColor() {
+  const dim = Math.min(0.9, Math.max(0, look.bg_dim ?? 0.45));
+  const dark = document.documentElement.dataset.theme === 'dark';
+  return dark ? `rgba(11, 16, 32, ${dim})` : `rgba(243, 244, 248, ${dim})`;
 }
 
 function buildSwatches() {
@@ -925,6 +947,13 @@ $('btnLook').onclick = () => {
   }
 };
 $('lookClose').onclick = () => ($('lookPanel').hidden = true);
+// Drag freely, but only write the final value to the database.
+$('dim').addEventListener('input', () => {
+  look.bg_dim = Number($('dim').value);
+  applyRoom();
+});
+$('dim').addEventListener('change', () => saveRoom({ bg_dim: Number($('dim').value) }));
+
 $('bgBtn').onclick = () => $('bgInput').click();
 $('bgClear').onclick = async () => {
   const old = look.bg_path;
@@ -1053,9 +1082,6 @@ function openReactions(e, msg) {
   reactTarget = msg;
   const box = $('reactions');
   box.hidden = false;
-  const r = box.getBoundingClientRect();
-  box.style.left = `${Math.min(Math.max(8, (e.clientX || 40) - r.width / 2), innerWidth - r.width - 8)}px`;
-  box.style.top = `${Math.max(8, (e.clientY || 80) - r.height - 12)}px`;
 
   box.querySelector('.trash')?.remove();
   box.querySelector('.pencil')?.remove();
@@ -1084,6 +1110,17 @@ function openReactions(e, msg) {
     };
     box.append(t);
   }
+
+  // Measure only once the buttons are in place, or the box wraps to a
+  // different size than the one we positioned.
+  const r = box.getBoundingClientRect();
+  const x = (e.clientX ?? innerWidth / 2) - r.width / 2;
+  const y = (e.clientY ?? 120) - r.height - 12;
+
+  // max() outermost, so an oversized box is pinned on screen rather than
+  // pushed off the left edge.
+  box.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8))}px`;
+  box.style.top = `${Math.max(8, Math.min(y, innerHeight - r.height - 8))}px`;
 }
 
 $('btnReply').onclick = () => {
