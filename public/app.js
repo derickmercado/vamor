@@ -1,28 +1,39 @@
-'use strict';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 /* -------------------------------------------------------------- setup */
 
 const $ = (id) => document.getElementById(id);
-const api = (p, opts = {}) =>
-  fetch(p, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', 'X-User': me || '', ...(opts.headers || {}) },
-  });
+const cfg = window.VAMOR_CONFIG || {};
 
-let me = localStorage.getItem('vamor.me') || '';
-let names = [];
-let lastId = 0;
-let peer = null;
+if (!cfg.SUPABASE_URL || cfg.SUPABASE_URL.includes('YOUR-PROJECT')) {
+  document.body.innerHTML =
+    '<div class="screen" style="place-content:center;text-align:center;padding:24px">' +
+    '<p>Fill in your Supabase URL and anon key in <b>public/config.js</b>.</p></div>';
+  throw new Error('config.js not filled in');
+}
+
+const sb = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+});
+
+let myId = null; // auth user uuid
+let myEmail = '';
+let myName = '';
+let peer = null; // the other row in `members`
+let room = null; // realtime presence channel
+let peerOnline = false;
+let peerTyping = false;
+
 const byId = new Map(); // message id -> { msg, el, bubble }
 let lastRow = null;
+let lastId = 0;
 let scrollPinned = true;
 
 /* --------------------------------------------------------------- theme */
 
-const savedTheme =
+document.documentElement.dataset.theme =
   localStorage.getItem('vamor.theme') ||
   (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-document.documentElement.dataset.theme = savedTheme;
 
 $('btnTheme').onclick = () => {
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
@@ -45,55 +56,201 @@ if (vv) {
   fit();
 }
 
-// Keep the newest message visible when the keyboard opens.
 $('input').addEventListener('focus', () => setTimeout(() => scrollDown(true), 250));
 
-/* ------------------------------------------------------ who are you */
+/* ---------------------------------------------------------------- auth */
 
-async function boot() {
-  names = (await (await fetch('/api/who')).json()).names;
+const show = (id) => {
+  for (const s of ['splash', 'auth', 'chat']) $(s).hidden = s !== id;
+};
 
-  // /?me=Bebe lets each of you bookmark a link that skips the picker.
-  const asked = new URLSearchParams(location.search).get('me');
-  if (asked && names.includes(asked)) {
-    me = asked;
-    localStorage.setItem('vamor.me', me);
-    history.replaceState(null, '', location.pathname);
-  }
+function authError(msg) {
+  const el = $('authError');
+  el.textContent = msg;
+  el.hidden = !msg;
+}
 
-  if (me && names.includes(me)) return enter();
+let pendingEmail = '';
 
-  $('pickList').innerHTML = '';
-  names.forEach((n, i) => {
-    const b = document.createElement('button');
-    b.className = 'pick-btn';
-    b.innerHTML = `<span class="avatar">${i === 0 ? '💙' : '💖'}</span><span></span>`;
-    b.lastElementChild.textContent = n;
-    b.onclick = () => {
-      me = n;
-      localStorage.setItem('vamor.me', n);
-      enter();
-    };
-    $('pickList').append(b);
+$('emailForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = $('email').value.trim().toLowerCase();
+  if (!email) return;
+  const btn = $('emailForm').querySelector('button');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  authError('');
+
+  const { error } = await sb.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: location.origin },
   });
-}
 
-function enter() {
-  $('pick').hidden = true;
-  $('chat').hidden = false;
-  const other = names.find((n) => n !== me) || 'Her';
-  $('peerName').textContent = other;
-  $('peerAvatar').textContent = names.indexOf(other) === 0 ? '💙' : '💖';
-  $('input').focus();
-  sync();
-}
+  btn.disabled = false;
+  btn.textContent = 'Send me the link';
+  if (error) return authError(error.message);
 
-$('btnSwitch').onclick = () => {
-  localStorage.removeItem('vamor.me');
+  pendingEmail = email;
+  $('sentTo').textContent = email;
+  $('emailForm').hidden = true;
+  $('codeForm').hidden = false;
+  $('code').focus();
+});
+
+$('codeForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const token = $('code').value.trim();
+  if (token.length !== 6) return authError('That code should be 6 digits.');
+  const btn = $('codeForm').querySelector('button');
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+  authError('');
+
+  const { error } = await sb.auth.verifyOtp({ email: pendingEmail, token, type: 'email' });
+
+  btn.disabled = false;
+  btn.textContent = 'Sign in';
+  if (error) return authError(error.message);
+  // onAuthStateChange takes it from here.
+});
+
+$('backToEmail').onclick = () => {
+  $('codeForm').hidden = true;
+  $('emailForm').hidden = false;
+  authError('');
+};
+
+$('btnSignOut').onclick = async () => {
+  if (!confirm('Sign out of this device?')) return;
+  await sb.auth.signOut();
   location.reload();
 };
 
-/* ---------------------------------------------------------- rendering */
+/* ---------------------------------------------------------------- boot */
+
+sb.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_IN' && session && !myId) start(session);
+  if (event === 'SIGNED_OUT') location.reload();
+});
+
+(async function boot() {
+  const { data } = await sb.auth.getSession();
+  if (data.session) return start(data.session);
+  show('auth');
+})();
+
+async function start(session) {
+  myId = session.user.id;
+  myEmail = (session.user.email || '').toLowerCase();
+  show('splash');
+
+  // The `members` table is the allowlist. If RLS hides it, you're not on it.
+  const { data: members, error } = await sb.from('members').select('*');
+
+  if (error || !members?.length) {
+    show('auth');
+    $('emailForm').hidden = true;
+    $('codeForm').hidden = true;
+    $('authNote').hidden = false;
+    $('authNote').innerHTML =
+      `<b>${myEmail}</b> isn't on the list for this conversation.<br />` +
+      `Add it to the <code>members</code> table in Supabase, then reload.`;
+    return;
+  }
+
+  const mine = members.find((m) => m.email === myEmail);
+  myName = mine?.display_name || 'Me';
+  peer = members.find((m) => m.email !== myEmail) || null;
+
+  $('peerName').textContent = peer?.display_name || 'Waiting for her…';
+  $('peerAvatar').textContent = peer?.avatar || '♥';
+
+  show('chat');
+  await subscribe();
+  await loadMessages();
+  joinRoom();
+  heartbeat();
+  $('input').focus();
+}
+
+/* ------------------------------------------------------------ messages */
+
+/** Turn a database row into the shape the renderer expects. */
+function norm(r) {
+  return {
+    id: r.id,
+    from: r.sender_name,
+    mine: r.sender === myId,
+    type: r.kind,
+    text: r.body,
+    audioPath: r.audio_path,
+    duration: r.duration || 0,
+    peaks: r.peaks || [],
+    reaction: r.reaction || '',
+    deleted: !!r.deleted,
+    at: new Date(r.created_at).getTime(),
+  };
+}
+
+// Realtime is subscribed before the first read, so anything arriving during
+// the initial query is held here and replayed once the thread is painted.
+let buffered = [];
+let painted = false;
+
+async function subscribe() {
+  await new Promise((resolve) => {
+    sb.channel('messages-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (p) => {
+        const row = p.new;
+        if (!row) return;
+        if (!painted) buffered.push(row);
+        else applyRow(row);
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'members' }, (p) => {
+        if (p.new && p.new.email !== myEmail) {
+          peer = p.new;
+          renderPeer();
+        }
+      })
+      .subscribe((status) => status === 'SUBSCRIBED' && resolve());
+  });
+}
+
+function applyRow(row) {
+  const msg = norm(row);
+  if (byId.has(msg.id)) updateMessage(msg);
+  else {
+    addMessage(msg);
+    lastId = Math.max(lastId, msg.id);
+    if (!msg.mine) {
+      ping();
+      if (document.visibilityState === 'visible') markRead();
+    }
+    if (scrollPinned) scrollDown();
+  }
+}
+
+async function loadMessages() {
+  const { data, error } = await sb
+    .from('messages')
+    .select('*')
+    .order('id', { ascending: true })
+    .limit(1000);
+
+  if (error) return toast('Could not load the conversation');
+
+  for (const row of data) {
+    addMessage(norm(row));
+    lastId = Math.max(lastId, row.id);
+  }
+  painted = true;
+  buffered.forEach(applyRow);
+  buffered = [];
+  scrollDown(true);
+  markRead();
+}
+
+/* --------------------------------------------------------- rendering */
 
 const pad = (n) => String(n).padStart(2, '0');
 const clock = (t) => {
@@ -106,15 +263,14 @@ const mmss = (s) => `${Math.floor(s / 60)}:${pad(Math.floor(s % 60))}`;
 function dayLabel(t) {
   const d = new Date(t);
   const today = new Date();
-  const yday = new Date(today.getTime() - 864e5);
   const same = (a, b) => a.toDateString() === b.toDateString();
   if (same(d, today)) return 'Today';
-  if (same(d, yday)) return 'Yesterday';
+  if (same(d, new Date(today.getTime() - 864e5))) return 'Yesterday';
   return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 function addMessage(msg) {
-  if (byId.has(msg.id)) return updateMessage(msg);
+  if (byId.has(msg.id)) return;
   $('empty').hidden = true;
 
   const prev = [...byId.values()].pop();
@@ -127,7 +283,7 @@ function addMessage(msg) {
   }
 
   const row = document.createElement('div');
-  row.className = `row ${msg.from === me ? 'out' : 'in'} tail`;
+  row.className = `row ${msg.mine ? 'out' : 'in'} tail`;
   row.dataset.id = msg.id;
 
   const time = document.createElement('div');
@@ -136,21 +292,7 @@ function addMessage(msg) {
 
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
-
-  if (msg.type === 'voice') {
-    bubble.append(voiceBody(msg));
-  } else if (msg.deleted) {
-    bubble.classList.add('deleted');
-    bubble.textContent = msg.from === me ? 'You unsent a message' : 'Unsent a message';
-  } else {
-    bubble.textContent = msg.text;
-    // A message that's nothing but emoji deserves to be big.
-    if (/^\p{Extended_Pictographic}{1,3}$/u.test(msg.text.trim())) {
-      bubble.style.fontSize = '38px';
-      bubble.style.background = 'none';
-      bubble.style.padding = '2px 8px';
-    }
-  }
+  paintBubble(bubble, msg);
 
   if (msg.reaction) {
     bubble.append(reactionChip(msg.reaction));
@@ -171,15 +313,35 @@ function addMessage(msg) {
     bubble.addEventListener(ev, () => clearTimeout(hold))
   );
 
-  row.append(msg.from === me ? time : bubble, msg.from === me ? bubble : time);
+  row.append(msg.mine ? time : bubble, msg.mine ? bubble : time);
 
-  // Group consecutive messages from the same person.
   row.dataset.from = msg.from;
   if (lastRow?.dataset.from === msg.from) lastRow.classList.remove('tail');
   lastRow = row;
 
   $('thread').append(row);
   byId.set(msg.id, { msg, el: row, bubble });
+}
+
+function paintBubble(bubble, msg) {
+  bubble.replaceChildren();
+  bubble.classList.toggle('deleted', msg.deleted);
+
+  if (msg.deleted) {
+    bubble.textContent = msg.mine ? 'You unsent a message' : 'Unsent a message';
+    return;
+  }
+  if (msg.type === 'voice') {
+    bubble.append(voiceBody(msg));
+    return;
+  }
+  bubble.textContent = msg.text;
+  // A message that's nothing but emoji deserves to be big.
+  if (/^\p{Extended_Pictographic}{1,3}$/u.test((msg.text || '').trim())) {
+    bubble.style.fontSize = '38px';
+    bubble.style.background = 'none';
+    bubble.style.padding = '2px 8px';
+  }
 }
 
 function updateMessage(patch) {
@@ -189,13 +351,11 @@ function updateMessage(patch) {
 
   if (patch.deleted && !msg.deleted) {
     msg.deleted = true;
-    bubble.replaceChildren();
-    bubble.classList.add('deleted');
-    bubble.textContent = msg.from === me ? 'You unsent a message' : 'Unsent a message';
+    paintBubble(bubble, msg);
   }
 
-  if ((patch.reaction || '') !== (msg.reaction || '')) {
-    msg.reaction = patch.reaction || '';
+  if (patch.reaction !== msg.reaction) {
+    msg.reaction = patch.reaction;
     bubble.querySelector('.reaction')?.remove();
     if (msg.reaction) bubble.append(reactionChip(msg.reaction));
     el.classList.toggle('reacted', !!msg.reaction);
@@ -210,6 +370,13 @@ function reactionChip(emoji) {
 }
 
 /* ------------------------------------------------------- voice bubble */
+
+/** Clips live in a private bucket, so playback needs a short-lived signed URL. */
+async function signedUrl(path) {
+  const { data, error } = await sb.storage.from('voice').createSignedUrl(path, 3600);
+  if (error) throw error;
+  return data.signedUrl;
+}
 
 function voiceBody(msg) {
   const wrap = document.createElement('div');
@@ -231,43 +398,54 @@ function voiceBody(msg) {
 
   const dur = document.createElement('span');
   dur.className = 'dur';
-  dur.textContent = mmss(msg.duration || 0);
-
-  const audio = new Audio(`/api/audio/${msg.id}`);
-  audio.preload = 'none';
+  dur.textContent = mmss(msg.duration);
 
   const paint = (ratio) => {
     const upto = Math.round(ratio * bars.length);
     bars.forEach((b, i) => b.classList.toggle('on', i < upto));
   };
 
-  play.onclick = (e) => {
+  let audio = null;
+
+  async function ensureAudio() {
+    if (audio) return audio;
+    audio = new Audio(await signedUrl(msg.audioPath));
+    audio.preload = 'auto';
+    audio.onplay = () => (play.textContent = '❚❚');
+    audio.onpause = () => (play.textContent = '▶');
+    audio.ontimeupdate = () => {
+      const total = isFinite(audio.duration) && audio.duration ? audio.duration : msg.duration || 1;
+      dur.textContent = mmss(Math.max(0, total - audio.currentTime));
+      paint(audio.currentTime / total);
+    };
+    audio.onended = () => {
+      play.textContent = '▶';
+      dur.textContent = mmss(msg.duration);
+      paint(0);
+      audio.currentTime = 0;
+    };
+    return audio;
+  }
+
+  play.onclick = async (e) => {
     e.stopPropagation();
-    document.querySelectorAll('audio').forEach((a) => a !== audio && a.pause());
-    if (audio.paused) audio.play().catch(() => toast('Could not play that clip'));
-    else audio.pause();
+    try {
+      const a = await ensureAudio();
+      document.querySelectorAll('audio').forEach((o) => o !== a && o.pause());
+      if (a.paused) await a.play();
+      else a.pause();
+    } catch {
+      toast('Could not play that clip');
+    }
   };
 
-  wave.onclick = (e) => {
+  wave.onclick = async (e) => {
+    const a = await ensureAudio();
     const r = wave.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-    const total = audio.duration || msg.duration || 0;
-    if (total) audio.currentTime = ratio * total;
+    const total = isFinite(a.duration) && a.duration ? a.duration : msg.duration || 0;
+    if (total) a.currentTime = ratio * total;
     paint(ratio);
-  };
-
-  audio.onplay = () => (play.textContent = '❚❚');
-  audio.onpause = () => (play.textContent = '▶');
-  audio.ontimeupdate = () => {
-    const total = audio.duration && isFinite(audio.duration) ? audio.duration : msg.duration || 1;
-    dur.textContent = mmss(Math.max(0, total - audio.currentTime));
-    paint(audio.currentTime / total);
-  };
-  audio.onended = () => {
-    play.textContent = '▶';
-    dur.textContent = mmss(msg.duration || 0);
-    paint(0);
-    audio.currentTime = 0;
   };
 
   wrap.append(play, wave, dur);
@@ -279,23 +457,22 @@ function voiceBody(msg) {
 let reactTarget = null;
 
 function openReactions(e, msg) {
+  if (msg.deleted) return;
   reactTarget = msg;
   const box = $('reactions');
   box.hidden = false;
   const r = box.getBoundingClientRect();
-  const x = Math.min(Math.max(8, (e.clientX || 40) - r.width / 2), innerWidth - r.width - 8);
-  const y = Math.max(8, (e.clientY || 80) - r.height - 12);
-  box.style.left = `${x}px`;
-  box.style.top = `${y}px`;
+  box.style.left = `${Math.min(Math.max(8, (e.clientX || 40) - r.width / 2), innerWidth - r.width - 8)}px`;
+  box.style.top = `${Math.max(8, (e.clientY || 80) - r.height - 12)}px`;
 
   box.querySelector('.trash')?.remove();
-  if (msg.from === me && !msg.deleted) {
+  if (msg.mine) {
     const t = document.createElement('button');
     t.className = 'trash';
     t.textContent = '🗑';
-    t.onclick = async () => {
+    t.onclick = () => {
       box.hidden = true;
-      await api('/api/delete', { method: 'POST', body: JSON.stringify({ id: msg.id }) });
+      unsend(msg);
     };
     box.append(t);
   }
@@ -306,15 +483,21 @@ $('reactions').addEventListener('click', async (e) => {
   if (!btn || !reactTarget) return;
   $('reactions').hidden = true;
   const emoji = btn.dataset.e === reactTarget.reaction ? '' : btn.dataset.e;
-  await api('/api/react', {
-    method: 'POST',
-    body: JSON.stringify({ id: reactTarget.id, reaction: emoji }),
-  });
+  const { error } = await sb.from('messages').update({ reaction: emoji }).eq('id', reactTarget.id);
+  if (error) toast('Could not react');
 });
 
 document.addEventListener('pointerdown', (e) => {
   if (!e.target.closest('#reactions') && !e.target.closest('.bubble')) $('reactions').hidden = true;
 });
+
+async function unsend(msg) {
+  const { error } = await sb.from('messages').update({ deleted: true }).eq('id', msg.id);
+  if (error) return toast('Could not unsend');
+  // Best effort — the row is already marked, so a failure here just leaves an
+  // orphaned file that nothing links to.
+  if (msg.audioPath) sb.storage.from('voice').remove([msg.audioPath]);
+}
 
 /* ------------------------------------------------------------- toast */
 
@@ -324,7 +507,7 @@ function toast(text) {
   t.textContent = text;
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 2600);
+  toastTimer = setTimeout(() => (t.hidden = true), 2800);
 }
 
 /* --------------------------------------------------------- send text */
@@ -333,10 +516,16 @@ async function sendText() {
   const text = $('input').value.trim();
   if (!text) return;
   $('input').value = '';
-  try {
-    const r = await api('/api/send', { method: 'POST', body: JSON.stringify({ type: 'text', text }) });
-    if (!r.ok) throw new Error();
-  } catch {
+  setTyping(false);
+
+  const { error } = await sb.from('messages').insert({
+    sender: myId,
+    sender_name: myName,
+    kind: 'text',
+    body: text,
+  });
+
+  if (error) {
     $('input').value = text;
     toast('Not sent — check the connection');
   }
@@ -350,19 +539,23 @@ $('input').addEventListener('keydown', (e) => {
   }
 });
 
-let typingSent = 0;
+let typingOn = false;
+let typingTimer;
+function setTyping(on) {
+  if (on === typingOn) return;
+  typingOn = on;
+  room?.track({ name: myName, typing: on });
+}
+
 $('input').addEventListener('input', () => {
-  const now = Date.now();
-  if ($('input').value && now - typingSent > 2500) {
-    typingSent = now;
-    api('/api/typing', { method: 'POST', body: JSON.stringify({ on: true }) }).catch(() => {});
-  }
+  setTyping(!!$('input').value);
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => setTyping(false), 4000);
 });
 
 /* ------------------------------------------------------ voice mails */
 
-let rec = null; // { recorder, chunks, stream, startedAt, locked, ctx, raf }
-
+let rec = null;
 const MIMES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
 
 async function startRecording() {
@@ -380,6 +573,7 @@ async function startRecording() {
   const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
   const chunks = [];
   recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  recorder.onstop = () => finishRecording();
   recorder.start();
 
   rec = { recorder, chunks, stream, startedAt: Date.now(), locked: false, cancelled: false };
@@ -388,8 +582,6 @@ async function startRecording() {
   $('btnMic').classList.add('recording');
   tickTimer();
   liveWave(stream);
-
-  recorder.onstop = () => finishRecording();
 }
 
 function tickTimer() {
@@ -423,8 +615,7 @@ function liveWave(stream) {
     const h = (canvas.height = canvas.clientHeight * devicePixelRatio);
     const barW = 3 * devicePixelRatio;
     const gap = 2 * devicePixelRatio;
-    const count = Math.floor(w / (barW + gap));
-    const slice = history.slice(-count);
+    const slice = history.slice(-Math.floor(w / (barW + gap)));
 
     ctx2d.clearRect(0, 0, w, h);
     ctx2d.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
@@ -446,6 +637,7 @@ function teardown() {
   $('recBar').hidden = true;
   $('btnMic').classList.remove('recording');
   $('recTime').textContent = '0:00';
+  $('recBar').querySelector('.rec-hint').textContent = 'release to send';
 }
 
 function stopRecording({ cancel = false } = {}) {
@@ -465,35 +657,33 @@ async function finishRecording() {
   if (r.cancelled) return;
   if (seconds < 0.6) return toast('Hold the mic a little longer');
 
-  const blob = new Blob(r.chunks, { type: r.recorder.mimeType || 'audio/webm' });
+  const type = r.recorder.mimeType || 'audio/webm';
+  const blob = new Blob(r.chunks, { type });
   if (!blob.size) return toast('Nothing was recorded');
 
-  const [peaks, audio] = await Promise.all([peaksFrom(blob), blobToBase64(blob)]);
+  const peaks = await peaksFrom(blob);
+  const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+  const path = `${myId}/${crypto.randomUUID()}.${ext}`;
 
-  try {
-    const res = await api('/api/send', {
-      method: 'POST',
-      body: JSON.stringify({
-        type: 'voice',
-        audio,
-        mime: (r.recorder.mimeType || 'audio/webm').split(';')[0],
-        duration: seconds,
-        peaks,
-      }),
-    });
-    if (!res.ok) throw new Error();
-  } catch {
+  const up = await sb.storage.from('voice').upload(path, blob, {
+    contentType: type.split(';')[0],
+    upsert: false,
+  });
+  if (up.error) return toast('Voice mail failed to upload');
+
+  const { error } = await sb.from('messages').insert({
+    sender: myId,
+    sender_name: myName,
+    kind: 'voice',
+    audio_path: path,
+    duration: seconds,
+    peaks,
+  });
+
+  if (error) {
+    sb.storage.from('voice').remove([path]);
     toast('Voice mail failed to send');
   }
-}
-
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(String(fr.result).split(',')[1]);
-    fr.onerror = reject;
-    fr.readAsDataURL(blob);
-  });
 }
 
 /** Downsample the clip to 34 bars so the bubble shows a real waveform. */
@@ -539,22 +729,38 @@ mic.addEventListener('pointerup', () => {
 mic.addEventListener('pointercancel', () => rec && !rec.locked && stopRecording({ cancel: true }));
 $('recCancel').onclick = () => stopRecording({ cancel: true });
 
-/* ------------------------------------------------------------- sync */
+/* -------------------------------------------------- presence & status */
 
-function renderPeer(peers) {
-  peer = peers.find((p) => p.name !== me) || peers[0] || null;
-  const online = !!peer?.online;
-  $('peerAvatar').classList.toggle('online', online);
+function joinRoom() {
+  room = sb.channel('room', { config: { presence: { key: myId } } });
+
+  room
+    .on('presence', { event: 'sync' }, () => {
+      const state = room.presenceState();
+      const others = Object.entries(state).filter(([k]) => k !== myId);
+      peerOnline = others.length > 0;
+      peerTyping = others.some(([, metas]) => metas.some((m) => m.typing));
+      renderPeer();
+    })
+    .subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') await room.track({ name: myName, typing: false });
+    });
+}
+
+function renderPeer() {
+  $('peerAvatar').classList.toggle('online', peerOnline);
+  $('peerName').textContent = peer?.display_name || 'Waiting for her…';
+  if (peer?.avatar) $('peerAvatar').textContent = peer.avatar;
+
   const status = $('peerStatus');
-  status.classList.toggle('on', online);
-  if (!peer) status.textContent = 'not here yet';
-  else if (peer.typing) status.textContent = 'typing…';
-  else if (online) status.textContent = 'Active now';
-  else if (peer.lastSeen) status.textContent = `Active ${ago(peer.lastSeen)}`;
+  status.classList.toggle('on', peerOnline);
+  if (peerTyping) status.textContent = 'typing…';
+  else if (peerOnline) status.textContent = 'Active now';
+  else if (peer?.updated_at) status.textContent = `Active ${ago(new Date(peer.updated_at).getTime())}`;
   else status.textContent = 'offline';
 
-  $('typing').hidden = !peer?.typing;
-  if (peer?.typing && scrollPinned) scrollDown();
+  $('typing').hidden = !peerTyping;
+  if (peerTyping && scrollPinned) scrollDown();
   renderReceipt();
 }
 
@@ -568,10 +774,10 @@ function ago(t) {
 
 function renderReceipt() {
   document.querySelector('.receipt')?.remove();
-  if (!peer?.lastRead) return;
-  const mine = [...byId.values()].filter((e) => e.msg.from === me);
+  if (!peer?.last_read) return;
+  const mine = [...byId.values()].filter((e) => e.msg.mine);
   const last = mine[mine.length - 1];
-  if (!last || peer.lastRead < last.msg.id) return;
+  if (!last || peer.last_read < last.msg.id) return;
   const d = document.createElement('div');
   d.className = 'receipt';
   d.textContent = 'Seen';
@@ -588,38 +794,25 @@ $('thread').addEventListener('scroll', () => {
   scrollPinned = t.scrollHeight - t.scrollTop - t.clientHeight < 80;
 });
 
-let failures = 0;
-
-async function sync() {
-  try {
-    const res = await api(`/api/sync?since=${lastId}&user=${encodeURIComponent(me)}`);
-    if (!res.ok) throw new Error(res.status);
-    const state = await res.json();
-    failures = 0;
-
-    const fresh = state.messages.length;
-    const first = lastId === 0;
-    for (const m of state.messages) {
-      addMessage(m);
-      lastId = Math.max(lastId, m.id);
-      if (!first && m.from !== me) ping();
-    }
-    state.changed?.forEach(updateMessage);
-    renderPeer(state.peers || []);
-
-    if (fresh && (scrollPinned || first)) scrollDown(first);
-    if (fresh && document.visibilityState === 'visible') markRead();
-  } catch {
-    failures++;
-    $('peerStatus').textContent = 'reconnecting…';
-    await new Promise((r) => setTimeout(r, Math.min(8000, 500 * failures)));
-  }
-  sync();
+let readSent = 0;
+function markRead() {
+  if (!lastId || lastId === readSent) return;
+  readSent = lastId;
+  sb.from('members')
+    .update({ last_read: lastId, updated_at: new Date().toISOString() })
+    .eq('email', myEmail)
+    .then(() => {}, () => {});
 }
 
-function markRead() {
-  if (!lastId) return;
-  api('/api/read', { method: 'POST', body: JSON.stringify({ lastId }) }).catch(() => {});
+/** Keeps "Active 5m ago" honest for whoever is offline. */
+function heartbeat() {
+  setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    sb.from('members')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('email', myEmail)
+      .then(() => {}, () => {});
+  }, 45000);
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -649,13 +842,11 @@ function ping() {
     }
     return;
   }
-  if (Notification?.permission === 'granted') {
-    new Notification(`${peer?.name || 'She'} sent you something 💌`);
+  if (window.Notification?.permission === 'granted') {
+    new Notification(`${peer?.display_name || 'She'} sent you something 💌`);
   }
 }
 
 if ('Notification' in window && Notification.permission === 'default') {
   document.addEventListener('click', () => Notification.requestPermission(), { once: true });
 }
-
-boot();

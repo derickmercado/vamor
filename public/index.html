@@ -17,13 +17,42 @@
 </head>
 <body>
 
-<!-- ------------------------------------------------------ who are you -->
-<div id="pick" class="screen">
+<!-- ------------------------------------------------------------- boot -->
+<div id="splash" class="screen">
+  <div class="spinner"></div>
+</div>
+
+<!-- ------------------------------------------------------------- auth -->
+<div id="auth" class="screen" hidden>
   <div class="login-card">
     <div class="login-mark">💌</div>
     <h1>Voicemail for amor</h1>
-    <p class="sub">Who's this?</p>
-    <div id="pickList" class="pick-list"></div>
+
+    <!-- step 1: ask for the email -->
+    <form id="emailForm">
+      <p class="sub">Sign in and I'll email you a link.</p>
+      <label class="field">
+        <span>Your email</span>
+        <input id="email" type="email" inputmode="email" autocomplete="email"
+               placeholder="you@example.com" required />
+      </label>
+      <button type="submit" class="btn-primary">Send me the link</button>
+    </form>
+
+    <!-- step 2: link sent, offer the code as a fallback -->
+    <form id="codeForm" hidden>
+      <p class="sub">Check <b id="sentTo"></b> — tap the link in the email.</p>
+      <label class="field">
+        <span>Or type the 6-digit code from that email</span>
+        <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code"
+               pattern="[0-9]*" maxlength="6" placeholder="123456" />
+      </label>
+      <button type="submit" class="btn-primary">Sign in</button>
+      <button type="button" id="backToEmail" class="btn-link">Use a different email</button>
+    </form>
+
+    <p id="authNote" class="note" hidden></p>
+    <p id="authError" class="error" hidden></p>
   </div>
 </div>
 
@@ -36,7 +65,7 @@
       <div class="peer-status" id="peerStatus">offline</div>
     </div>
     <button id="btnTheme" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">◐</button>
-    <button id="btnSwitch" class="icon-btn" title="Switch person" aria-label="Switch person">⇄</button>
+    <button id="btnSignOut" class="icon-btn" title="Sign out" aria-label="Sign out">⏻</button>
   </header>
 
   <main id="thread" class="thread">
@@ -83,6 +112,7 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="/app.js"></script>
+<script src="/config.js"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>
