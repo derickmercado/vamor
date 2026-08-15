@@ -184,6 +184,7 @@ let lockTimer = null;
 
 function relock() {
   sessionStorage.removeItem('vamor.unlocked');
+  clearTimeout(idleTimer);
   if ($('chat').hidden) return; // already away from the conversation
   closePanels();
   $('lightbox').hidden = true;
@@ -191,6 +192,33 @@ function relock() {
   $('passphrase').value = '';
   $('lockError').hidden = true;
   show('lock');
+}
+
+/* ------------------------------------------------------- idle locking */
+
+const IDLE_MS = Math.max(0, Number(cfg.IDLE_LOCK_MINUTES) || 0) * 60000;
+let idleTimer = null;
+
+/** Don't lock out from under someone mid voice note or mid video. */
+function mediaBusy() {
+  if (rec) return true;
+  return [...document.querySelectorAll('audio, video')].some((m) => !m.paused && !m.ended);
+}
+
+function resetIdle() {
+  if (!IDLE_MS || !lockRequired()) return;
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(onIdle, IDLE_MS);
+}
+
+function onIdle() {
+  if ($('chat').hidden) return; // already locked or signed out
+  if (mediaBusy()) return resetIdle(); // check again after another interval
+  relock();
+}
+
+for (const ev of ['pointerdown', 'keydown', 'touchstart', 'wheel', 'focus']) {
+  window.addEventListener(ev, resetIdle, { passive: true });
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -306,6 +334,7 @@ let chatStarted = false;
 
 async function openChat() {
   show('chat');
+  resetIdle();
   if (chatStarted) return;
   chatStarted = true;
 
