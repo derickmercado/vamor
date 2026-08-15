@@ -1,0 +1,12 @@
+{
+  // Only supabase/functions runs on Deno — everything else is plain browser
+  // JavaScript, so Deno checking must not be switched on repo-wide.
+  "deno.enable": true,
+  "deno.enablePaths": ["supabase/functions"],
+  "deno.lint": true,
+
+  // Stop the built-in TypeScript service from also grading those files and
+  // reporting npm:/jsr: imports and the Deno global as errors.
+  "javascript.validate.enable": true,
+  "typescript.validate.enable": true
+}

@@ -1,0 +1,7 @@
+{
+  "//": "Marks this folder as Deno so editors stop grading it as Node.",
+  "lock": false,
+  "compilerOptions": {
+    "lib": ["deno.window", "esnext"]
+  }
+}
