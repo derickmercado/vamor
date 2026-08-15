@@ -221,6 +221,7 @@ async function openChat() {
   chatStarted = true;
 
   await subscribe();
+  await loadRoom();
   await loadMessages();
   joinRoom();
   heartbeat();
@@ -234,7 +235,10 @@ function norm(r) {
   return {
     id: r.id,
     from: r.sender_name,
+    senderId: r.sender,
     mine: r.sender === myId,
+    replyTo: r.reply_to,
+    editedAt: r.edited_at,
     type: r.kind,
     text: r.body,
     audioPath: r.audio_path,
@@ -265,9 +269,20 @@ async function subscribe() {
         else applyRow(row);
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'members' }, (p) => {
-        if (p.new && p.new.email !== myEmail) {
+        if (!p.new) return;
+        if (p.new.email === myEmail) {
+          mine = p.new; // another device of yours changed your name or picture
+          myName = mine.display_name;
+          paintAvatar($('btnMe'), mine);
+        } else {
           peer = p.new;
           renderPeer();
+        }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'room' }, (p) => {
+        if (p.new) {
+          look = p.new;
+          applyRoom();
         }
       })
       .subscribe((status) => status === 'SUBSCRIBED' && resolve());
@@ -373,12 +388,55 @@ function addMessage(msg) {
 
   row.append(msg.mine ? time : bubble, msg.mine ? bubble : time);
 
-  row.dataset.from = msg.from;
-  if (lastRow?.dataset.from === msg.from) lastRow.classList.remove('tail');
+  // Group by sender id, not name — names are editable.
+  row.dataset.from = msg.senderId;
+  if (lastRow?.dataset.from === msg.senderId) lastRow.classList.remove('tail');
   lastRow = row;
 
   $('thread').append(row);
   byId.set(msg.id, { msg, el: row, bubble });
+}
+
+/** One line describing a message, for reply quotes and the composer bar. */
+function preview(msg) {
+  if (!msg) return 'message';
+  if (msg.deleted) return 'unsent message';
+  if (msg.type === 'voice') return '🎙 Voice mail';
+  if (msg.type === 'photo') return '🖼 Photo';
+  if (msg.type === 'gif') return 'GIF';
+  return msg.text || '';
+}
+
+const nameOf = (msg) => (msg?.mine ? 'You' : peer?.display_name || msg?.from || 'Her');
+
+function quoteBlock(msg) {
+  const target = byId.get(msg.replyTo)?.msg;
+  const q = document.createElement('button');
+  q.type = 'button';
+  q.className = 'quote';
+
+  const who = document.createElement('b');
+  who.textContent = target ? nameOf(target) : 'Message';
+  const what = document.createElement('span');
+  what.textContent = target ? preview(target) : 'no longer available';
+
+  q.append(who, what);
+  q.onclick = (e) => {
+    e.stopPropagation();
+    jumpTo(msg.replyTo);
+  };
+  return q;
+}
+
+/** Scroll a quoted message into view and flash it. */
+function jumpTo(id) {
+  const entry = byId.get(id);
+  if (!entry) return;
+  entry.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  entry.el.classList.remove('flash');
+  void entry.el.offsetWidth; // restart the animation
+  entry.el.classList.add('flash');
+  setTimeout(() => entry.el.classList.remove('flash'), 1200);
 }
 
 function paintBubble(bubble, msg) {
@@ -390,6 +448,8 @@ function paintBubble(bubble, msg) {
     bubble.textContent = msg.mine ? 'You unsent a message' : 'Unsent a message';
     return;
   }
+
+  if (msg.replyTo) bubble.append(quoteBlock(msg));
   if (msg.type === 'voice') {
     bubble.append(voiceBody(msg));
     return;
@@ -399,12 +459,22 @@ function paintBubble(bubble, msg) {
     bubble.append(photoBody(msg));
     return;
   }
-  bubble.textContent = msg.text;
+  // A text node would be wiped by the quote block, so keep the body in a span.
+  const body = document.createElement('span');
+  body.textContent = msg.text;
+  bubble.append(body);
+
   // A message that's nothing but emoji deserves to be big.
-  if (/^\p{Extended_Pictographic}{1,3}$/u.test((msg.text || '').trim())) {
-    bubble.style.fontSize = '38px';
-    bubble.style.background = 'none';
-    bubble.style.padding = '2px 8px';
+  const bare = !msg.replyTo && /^\p{Extended_Pictographic}{1,3}$/u.test((msg.text || '').trim());
+  bubble.style.fontSize = bare ? '38px' : '';
+  bubble.style.background = bare ? 'none' : '';
+  bubble.style.padding = bare ? '2px 8px' : '';
+
+  if (msg.editedAt) {
+    const tag = document.createElement('span');
+    tag.className = 'edited';
+    tag.textContent = 'edited';
+    bubble.append(tag);
   }
 }
 
@@ -415,6 +485,10 @@ function updateMessage(patch) {
 
   if (patch.deleted && !msg.deleted) {
     msg.deleted = true;
+    paintBubble(bubble, msg);
+  } else if (patch.text !== msg.text || patch.editedAt !== msg.editedAt) {
+    msg.text = patch.text;
+    msg.editedAt = patch.editedAt;
     paintBubble(bubble, msg);
   }
 
@@ -645,6 +719,7 @@ async function sendPhoto(file) {
     image_path: path,
     width: shrunk.width,
     height: shrunk.height,
+    reply_to: takeReply(),
   });
 
   if (error) {
@@ -690,7 +765,34 @@ async function paintAvatar(el, member) {
   }
 }
 
-$('btnMe').onclick = () => $('avatarInput').click();
+function openProfile() {
+  closePanels();
+  $('nameInput').value = mine?.display_name || '';
+  paintAvatar($('profilePic'), mine);
+  $('profilePanel').hidden = false;
+}
+
+$('btnMe').onclick = () => ($('profilePanel').hidden ? openProfile() : ($('profilePanel').hidden = true));
+$('profileClose').onclick = () => ($('profilePanel').hidden = true);
+$('profilePic').onclick = () => $('avatarInput').click();
+$('profilePicBtn').onclick = () => $('avatarInput').click();
+
+$('profileSave').onclick = async () => {
+  const name = $('nameInput').value.trim().slice(0, 24);
+  if (!name) return toast('Pick a name');
+  if (name === mine?.display_name) return ($('profilePanel').hidden = true);
+
+  const { error } = await sb
+    .from('members')
+    .update({ display_name: name, updated_at: new Date().toISOString() })
+    .eq('email', myEmail);
+
+  if (error) return toast('Could not save your name');
+  if (mine) mine.display_name = name;
+  myName = name;
+  $('profilePanel').hidden = true;
+  toast('Name updated');
+};
 
 $('avatarInput').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
@@ -722,6 +824,7 @@ $('avatarInput').addEventListener('change', async (e) => {
 
   if (mine) mine.avatar_url = path;
   paintAvatar($('btnMe'), mine);
+  paintAvatar($('profilePic'), mine);
   if (previous) sb.storage.from('photos').remove([previous]); // tidy up the old one
   toast('Picture updated');
 });
@@ -741,6 +844,122 @@ document.addEventListener('paste', (e) => {
   const file = item.getAsFile();
   if (file) sendPhoto(file);
 });
+
+/* ------------------------------------------------------- chat theme */
+
+/* The look is shared: it lives in the single `room` row, so whichever of you
+   changes it, both see it. */
+
+const THEMES = [
+  { id: 'default', a: '#ff5d8f', b: '#b445ff' },
+  { id: 'ocean', a: '#2f9bff', b: '#6a5bff' },
+  { id: 'sunset', a: '#ff8a3d', b: '#ff4d7d' },
+  { id: 'forest', a: '#2fbf71', b: '#1d8f9c' },
+  { id: 'candy', a: '#ff5fd2', b: '#7a5cff' },
+  { id: 'midnight', a: '#4a5fd0', b: '#8b45ff' },
+  { id: 'mono', a: '#6b7280', b: '#374151' },
+];
+
+let look = { theme: 'default', bg_path: null };
+
+function applyRoom() {
+  document.documentElement.dataset.chatTheme = look.theme || 'default';
+  [...$('swatches').children].forEach((s) => s.classList.toggle('on', s.dataset.id === look.theme));
+  $('bgClear').hidden = !look.bg_path;
+
+  const thread = $('thread');
+  if (!look.bg_path) {
+    thread.style.backgroundImage = '';
+    thread.classList.remove('has-bg');
+    return;
+  }
+  signedUrl('photos', look.bg_path)
+    .then((url) => {
+      const veil = 'var(--veil)';
+      thread.style.backgroundImage = `linear-gradient(${veil}, ${veil}), url("${url}")`;
+      thread.classList.add('has-bg');
+    })
+    .catch(() => {
+      thread.style.backgroundImage = '';
+      thread.classList.remove('has-bg');
+    });
+}
+
+function buildSwatches() {
+  const box = $('swatches');
+  box.replaceChildren();
+  for (const t of THEMES) {
+    const b = document.createElement('button');
+    b.className = 'swatch';
+    b.dataset.id = t.id;
+    b.title = t.id;
+    b.style.background = `linear-gradient(100deg, ${t.a}, ${t.b})`;
+    b.onclick = () => saveRoom({ theme: t.id });
+    box.append(b);
+  }
+}
+
+async function saveRoom(patch) {
+  look = { ...look, ...patch };
+  applyRoom();
+  const { error } = await sb
+    .from('room')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', 1);
+  if (error) toast('Could not save the theme');
+}
+
+async function loadRoom() {
+  const { data } = await sb.from('room').select('*').eq('id', 1).maybeSingle();
+  if (data) look = data;
+  buildSwatches();
+  applyRoom();
+}
+
+$('btnLook').onclick = () => {
+  if ($('lookPanel').hidden) {
+    closePanels();
+    $('lookPanel').hidden = false;
+  } else {
+    $('lookPanel').hidden = true;
+  }
+};
+$('lookClose').onclick = () => ($('lookPanel').hidden = true);
+$('bgBtn').onclick = () => $('bgInput').click();
+$('bgClear').onclick = async () => {
+  const old = look.bg_path;
+  await saveRoom({ bg_path: null });
+  if (old) sb.storage.from('photos').remove([old]);
+};
+
+$('bgInput').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file || !file.type.startsWith('image/')) return;
+
+  let shrunk;
+  try {
+    shrunk = await shrink(file);
+  } catch {
+    return toast('Could not read that picture');
+  }
+
+  const path = `backgrounds/${crypto.randomUUID()}.jpg`;
+  const up = await sb.storage.from('photos').upload(path, shrunk.blob, { contentType: shrunk.type });
+  if (up.error) return toast('Background failed to upload');
+
+  const old = look.bg_path;
+  await saveRoom({ bg_path: path });
+  if (old) sb.storage.from('photos').remove([old]);
+  $('lookPanel').hidden = true;
+});
+
+/** Only one sheet open at a time. */
+function closePanels() {
+  $('profilePanel').hidden = true;
+  $('lookPanel').hidden = true;
+  closeGifPanel();
+}
 
 /* ----------------------------------------------------------- gifs */
 
@@ -800,6 +1019,7 @@ async function sendGif(image) {
     remote_url: image.url,
     width: Number(image.width) || null,
     height: Number(image.height) || null,
+    reply_to: takeReply(),
   });
   if (error) toast('GIF failed to send');
 }
@@ -838,9 +1058,25 @@ function openReactions(e, msg) {
   box.style.top = `${Math.max(8, (e.clientY || 80) - r.height - 12)}px`;
 
   box.querySelector('.trash')?.remove();
+  box.querySelector('.pencil')?.remove();
+
+  // Only your own words can be corrected.
+  if (msg.mine && msg.type === 'text') {
+    const p = document.createElement('button');
+    p.className = 'tool pencil';
+    p.title = 'Edit';
+    p.textContent = '✏';
+    p.onclick = () => {
+      box.hidden = true;
+      startEdit(msg);
+    };
+    box.append(p);
+  }
+
   if (msg.mine) {
     const t = document.createElement('button');
-    t.className = 'trash';
+    t.className = 'tool trash';
+    t.title = 'Unsend';
     t.textContent = '🗑';
     t.onclick = () => {
       box.hidden = true;
@@ -848,6 +1084,62 @@ function openReactions(e, msg) {
     };
     box.append(t);
   }
+}
+
+$('btnReply').onclick = () => {
+  $('reactions').hidden = true;
+  if (reactTarget) startReply(reactTarget);
+};
+
+/* -------------------------------------------------- reply & edit state */
+
+let replyTo = null; // message being replied to
+let editing = null; // message being edited
+
+function showContext(label, snippet) {
+  $('contextLabel').textContent = label;
+  $('contextSnippet').textContent = snippet;
+  $('contextBar').hidden = false;
+}
+
+function clearContext() {
+  replyTo = null;
+  editing = null;
+  $('contextBar').hidden = true;
+  $('input').value = '';
+}
+
+function startReply(msg) {
+  editing = null;
+  replyTo = msg;
+  showContext(`Replying to ${nameOf(msg)}`, preview(msg));
+  $('input').focus();
+}
+
+function startEdit(msg) {
+  replyTo = null;
+  editing = msg;
+  showContext('Editing your message', preview(msg));
+  $('input').value = msg.text || '';
+  $('input').focus();
+  $('input').setSelectionRange($('input').value.length, $('input').value.length);
+}
+
+$('contextCancel').onclick = () => {
+  const wasEditing = !!editing;
+  clearContext();
+  if (!wasEditing) $('input').focus();
+};
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('contextBar').hidden) $('contextCancel').click();
+});
+
+/** Consume any pending reply, so photos and voice mails can answer too. */
+function takeReply() {
+  const id = replyTo?.id ?? null;
+  if (replyTo) clearContext();
+  return id;
 }
 
 $('reactions').addEventListener('click', async (e) => {
@@ -888,18 +1180,33 @@ function toast(text) {
 async function sendText() {
   const text = $('input').value.trim();
   if (!text) return;
-  $('input').value = '';
   setTyping(false);
+
+  // Saving a correction rather than sending something new.
+  if (editing) {
+    const target = editing;
+    if (text === target.text) return clearContext();
+    clearContext();
+    const { error } = await sb.from('messages').update({ body: text }).eq('id', target.id);
+    if (error) toast('Could not save the edit');
+    return;
+  }
+
+  const parent = replyTo;
+  $('input').value = '';
+  clearContext();
 
   const { error } = await sb.from('messages').insert({
     sender: myId,
     sender_name: myName,
     kind: 'text',
     body: text,
+    reply_to: parent?.id ?? null,
   });
 
   if (error) {
     $('input').value = text;
+    if (parent) startReply(parent);
     toast('Not sent — check the connection');
   }
 }
@@ -1051,6 +1358,7 @@ async function finishRecording() {
     audio_path: path,
     duration: seconds,
     peaks,
+    reply_to: takeReply(),
   });
 
   if (error) {

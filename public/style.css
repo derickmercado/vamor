@@ -506,6 +506,156 @@ button { cursor: pointer; border: 0; background: none; }
 }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 
+/* ---------------------------------------------------------- theming */
+
+/* Presets override the bubble gradient and accent. The shared choice lives
+   in the `room` table, so picking one changes it for both of you. */
+[data-chat-theme='ocean']   { --me-1: #2f9bff; --me-2: #6a5bff; --accent: #2f9bff; }
+[data-chat-theme='sunset']  { --me-1: #ff8a3d; --me-2: #ff4d7d; --accent: #ff6a3d; }
+[data-chat-theme='forest']  { --me-1: #2fbf71; --me-2: #1d8f9c; --accent: #2fbf71; }
+[data-chat-theme='candy']   { --me-1: #ff5fd2; --me-2: #7a5cff; --accent: #ff5fd2; }
+[data-chat-theme='midnight']{ --me-1: #4a5fd0; --me-2: #8b45ff; --accent: #7b6cff; }
+[data-chat-theme='mono']    { --me-1: #6b7280; --me-2: #374151; --accent: #6b7280; }
+
+/* A background picture sits under the bubbles. The veil is composited into
+   the background itself rather than layered as a positioned overlay, which
+   would end up painting behind the image. */
+:root { --veil: rgba(243, 244, 248, 0.62); }
+html[data-theme='dark'] { --veil: rgba(11, 16, 32, 0.66); }
+
+.thread {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: local;
+}
+
+/* ------------------------------------------------------------ sheets */
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  max-height: min(60vh, 460px);
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  animation: slideup 0.18s ease-out;
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.sheet-body { padding: 14px 16px 18px; overflow-y: auto; }
+
+.profile-row { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 14px; }
+.profile-pic {
+  width: 64px;
+  height: 64px;
+  font-size: 26px;
+  flex: none;
+  cursor: pointer;
+  overflow: hidden;
+}
+.profile-fields { flex: 1; min-width: 0; }
+.profile-fields .field { margin-bottom: 4px; }
+.profile-fields .btn-link { text-align: left; width: auto; margin: 0; padding: 2px 0; }
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.swatch {
+  height: 52px;
+  border-radius: 14px;
+  border: 2px solid transparent;
+  outline: 2px solid var(--line);
+  outline-offset: 2px;
+  transition: transform 0.12s, outline-color 0.15s;
+}
+.swatch:hover { transform: translateY(-2px); }
+.swatch.on { outline-color: var(--accent); outline-width: 3px; }
+
+.look-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.look-actions .btn-link { width: auto; margin: 0; padding: 4px 0; }
+
+/* ------------------------------------------------------- context bar */
+
+.context-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+.context-line {
+  width: 3px;
+  align-self: stretch;
+  min-height: 30px;
+  border-radius: 2px;
+  background: var(--accent);
+  flex: none;
+}
+.context-text { flex: 1; min-width: 0; font-size: 13px; line-height: 1.35; }
+.context-text b { display: block; color: var(--accent); font-size: 12px; }
+.context-text span {
+  display: block;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --------------------------------------------------------- quoted reply */
+
+.quote {
+  display: block;
+  margin: -2px 0 6px;
+  padding: 5px 9px;
+  border-left: 3px solid currentColor;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+  font-size: 12.5px;
+  line-height: 1.35;
+  opacity: 0.85;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.row.in .quote { background: rgba(127, 127, 160, 0.16); }
+.quote b { display: block; font-size: 11.5px; opacity: 0.9; }
+.quote span {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row.flash .bubble { animation: flash 1.1s ease-out; }
+@keyframes flash {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  25% { box-shadow: 0 0 0 4px rgba(255, 77, 125, 0.4); }
+}
+
+.edited {
+  font-size: 10.5px;
+  opacity: 0.65;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+.reactions-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 3px;
+  background: var(--line);
+}
+.reactions .tool { font-size: 15px; color: var(--muted); }
+
 /* ------------------------------------------------------- gif picker */
 
 .gif-panel {

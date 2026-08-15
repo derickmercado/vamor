@@ -80,9 +80,11 @@
       <div class="peer-name" id="peerName">Waiting for her…</div>
       <div class="peer-status" id="peerStatus">offline</div>
     </div>
-    <button id="btnMe" class="avatar me-avatar" title="Change your picture" aria-label="Change your picture">🙂</button>
+    <button id="btnMe" class="avatar me-avatar" title="Your profile" aria-label="Your profile">🙂</button>
     <input id="avatarInput" type="file" accept="image/*" hidden />
-    <button id="btnTheme" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">◐</button>
+    <input id="bgInput" type="file" accept="image/*" hidden />
+    <button id="btnLook" class="icon-btn" title="Chat theme" aria-label="Chat theme">🎨</button>
+    <button id="btnTheme" class="icon-btn" title="Toggle light/dark" aria-label="Toggle light/dark">◐</button>
     <button id="btnSignOut" class="icon-btn" title="Sign out" aria-label="Sign out">⏻</button>
   </header>
 
@@ -106,6 +108,42 @@
     <span class="rec-hint">release to send</span>
   </div>
 
+  <!-- your profile -->
+  <div id="profilePanel" class="sheet" hidden>
+    <div class="sheet-head">
+      <b>Your profile</b>
+      <button id="profileClose" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-body">
+      <div class="profile-row">
+        <button id="profilePic" class="avatar profile-pic" title="Change picture">🙂</button>
+        <div class="profile-fields">
+          <label class="field">
+            <span>Your name</span>
+            <input id="nameInput" type="text" maxlength="24" placeholder="Your name" />
+          </label>
+          <button id="profilePicBtn" class="btn-link">Change picture</button>
+        </div>
+      </div>
+      <button id="profileSave" class="btn-primary">Save</button>
+    </div>
+  </div>
+
+  <!-- chat theme -->
+  <div id="lookPanel" class="sheet" hidden>
+    <div class="sheet-head">
+      <b>Chat theme</b>
+      <button id="lookClose" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-body">
+      <div id="swatches" class="swatches"></div>
+      <div class="look-actions">
+        <button id="bgBtn" class="btn-link">Set a background picture</button>
+        <button id="bgClear" class="btn-link" hidden>Remove background</button>
+      </div>
+    </div>
+  </div>
+
   <!-- GIF picker -->
   <div id="gifPanel" class="gif-panel" hidden>
     <div class="gif-head">
@@ -114,6 +152,16 @@
     </div>
     <div id="gifResults" class="gif-grid"></div>
     <div id="gifStatus" class="gif-status">Loading…</div>
+  </div>
+
+  <!-- shown while replying to, or editing, a message -->
+  <div id="contextBar" class="context-bar" hidden>
+    <div class="context-line"></div>
+    <div class="context-text">
+      <b id="contextLabel"></b>
+      <span id="contextSnippet"></span>
+    </div>
+    <button id="contextCancel" class="icon-btn" aria-label="Cancel">✕</button>
   </div>
 
   <footer class="composer">
@@ -143,6 +191,8 @@
   <button data-e="👍">👍</button>
   <button data-e="🔥">🔥</button>
   <button data-e="" class="clear">✕</button>
+  <span class="reactions-sep"></span>
+  <button id="btnReply" class="tool" title="Reply">↩</button>
 </div>
 
 <!-- full-size photo viewer -->
