@@ -82,14 +82,8 @@ function buildPicker() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'pick-btn';
+    btn.textContent = person.name;
 
-    const face = document.createElement('span');
-    face.className = 'avatar';
-    face.textContent = person.avatar || '♥';
-    const label = document.createElement('span');
-    label.textContent = person.name;
-
-    btn.append(face, label);
     btn.onclick = () => {
       picked = person;
       $('pwWho').textContent = person.name;

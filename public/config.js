@@ -21,8 +21,8 @@ window.VAMOR_CONFIG = {
    * they're checked by Supabase.
    */
   PEOPLE: [
-    { name: 'Myles', email: 'derick.mercado2124@gmail.com', avatar: '💙' },
-    { name: 'Amor', email: 'justeniabatula10@gmail.com', avatar: '💖' },
+    { name: 'Anonymous', email: 'derick.mercado2124@gmail.com' },
+    { name: 'Amor', email: 'justeniabatula10@gmail.com' },
   ],
 
   /**
