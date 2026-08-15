@@ -496,7 +496,98 @@ button { cursor: pointer; border: 0; background: none; }
   to { transform: scaleX(1); }
 }
 
+/* ---------------------------------------------------- video bubble */
+
+.photo video {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  border-radius: 17px;
+  background: #000;
+}
+
+/* Poster + play badge, shown until the clip is actually opened. */
+.video-poster { position: relative; cursor: pointer; }
+.video-poster .play-badge {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+.video-len {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------ media grid */
+
+.media-grid {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+  align-content: start;
+}
+.media-grid button {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel-2);
+  transition: transform 0.12s, outline-color 0.12s;
+  outline: 2px solid transparent;
+}
+.media-grid img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.media-grid button:hover { transform: scale(1.04); outline-color: var(--accent); }
+.media-grid .tag {
+  position: absolute;
+  left: 5px;
+  bottom: 4px;
+  font-size: 11px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
 /* --------------------------------------------------------- lightbox */
+
+.lightbox-save {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+}
+.lightbox-save:hover { background: rgba(255, 255, 255, 0.28); }
 .lightbox {
   position: fixed;
   inset: 0;
@@ -533,12 +624,25 @@ button { cursor: pointer; border: 0; background: none; }
    long. The shell is always exactly one screen tall, so it stays put.
    The dimming veil is composited into background-image rather than layered as
    a positioned overlay, which would paint behind the image and dim nothing. */
-#chat.has-bg {
+#main.has-bg {
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
 }
-#chat.has-bg .thread { background-color: transparent; }
+#main.has-bg .thread { background-color: transparent; }
+
+/* On phones this wrapper is the whole screen and changes nothing; on desktop
+   it becomes the right-hand pane beside the rail. */
+.main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The rail is desktop-only — below the breakpoint it does not exist. */
+.side { display: none; }
 
 /* ------------------------------------------------------------ sheets */
 
@@ -916,6 +1020,103 @@ button { cursor: pointer; border: 0; background: none; }
   font-size: 13px;
   z-index: 30;
   animation: pop 0.2s;
+}
+
+/* ------------------------------------------------- desktop two-pane */
+/* Everything here is min-width only: the phone layout is untouched. */
+
+@media (min-width: 900px) {
+  #chat {
+    flex-direction: row;
+    max-width: 1180px;
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  .side {
+    display: flex;
+    flex-direction: column;
+    width: 264px;
+    flex: none;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+  }
+
+  .side-brand {
+    padding: 18px 18px 14px;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .side-me {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin: 0 10px 8px;
+    padding: 10px;
+    border-radius: 14px;
+    text-align: left;
+    transition: background 0.15s;
+  }
+  .side-me:hover { background: var(--panel-2); }
+  .side-me .avatar { width: 42px; height: 42px; font-size: 18px; overflow: hidden; }
+  .side-me-text { min-width: 0; }
+  .side-me-text b {
+    display: block;
+    font-size: 14.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .side-me-text span { font-size: 12px; color: var(--muted); }
+
+  .side-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--line);
+    flex: 1;
+  }
+  .side-nav button,
+  .side-foot button {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 11px 12px;
+    border-radius: 12px;
+    font-size: 14px;
+    color: var(--text);
+    text-align: left;
+    transition: background 0.15s, color 0.15s;
+  }
+  .side-nav button:hover { background: var(--panel-2); color: var(--accent); }
+
+  .side-ic {
+    width: 22px;
+    flex: none;
+    text-align: center;
+    font-size: 15px;
+  }
+
+  .side-foot { padding: 10px; border-top: 1px solid var(--line); }
+  .side-foot button { color: var(--muted); }
+  .side-foot button:hover { background: var(--panel-2); color: var(--accent); }
+
+  /* These moved into the rail, so the header keeps just the person. */
+  .topbar .me-avatar,
+  .topbar #btnMedia,
+  .topbar #btnLook,
+  .topbar #btnTheme,
+  .topbar #btnSignOut { display: none; }
+
+  /* Bubbles get cramped if they can stretch the full pane width. */
+  .bubble { max-width: min(70%, 560px); }
+
+  /* Sheets are anchored to the composer, so keep them inside the pane. */
+  .sheet, .gif-panel { max-height: min(56vh, 420px); }
 }
 
 /* --------------------------------------------------------- responsive */

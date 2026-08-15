@@ -74,6 +74,35 @@
 
 <!-- ----------------------------------------------------------- chat -->
 <div id="chat" class="screen" hidden>
+
+  <!-- desktop-only rail: the chat's own functions, where Messenger puts the
+       conversation list -->
+  <aside class="side">
+    <div class="side-brand">💌 Vamor</div>
+
+    <button id="sideProfile" class="side-me">
+      <span class="avatar" id="sideAvatar">🙂</span>
+      <span class="side-me-text">
+        <b id="sideName">You</b>
+        <span>Edit name &amp; picture</span>
+      </span>
+    </button>
+
+    <nav class="side-nav">
+      <button id="sidePhoto"><span class="side-ic">🖼</span>Send a picture</button>
+      <button id="sideVideo"><span class="side-ic">🎬</span>Send a video</button>
+      <button id="sideMedia"><span class="side-ic">🗂</span>Shared media</button>
+      <button id="sideGif" hidden><span class="side-ic">🎞</span>Send a GIF</button>
+      <button id="sideLook"><span class="side-ic">🎨</span>Chat theme</button>
+      <button id="sideMode"><span class="side-ic">◐</span>Light / dark</button>
+    </nav>
+
+    <div class="side-foot">
+      <button id="sideSignOut"><span class="side-ic">⏻</span>Sign out</button>
+    </div>
+  </aside>
+
+  <div id="main" class="main">
   <header class="topbar">
     <div class="avatar" id="peerAvatar">♥</div>
     <div class="peer">
@@ -83,6 +112,8 @@
     <button id="btnMe" class="avatar me-avatar" title="Your profile" aria-label="Your profile">🙂</button>
     <input id="avatarInput" type="file" accept="image/*" hidden />
     <input id="bgInput" type="file" accept="image/*" hidden />
+    <input id="videoInput" type="file" accept="video/*" hidden />
+    <button id="btnMedia" class="icon-btn" title="Shared media" aria-label="Shared media">🗂</button>
     <button id="btnLook" class="icon-btn" title="Chat theme" aria-label="Chat theme">🎨</button>
     <button id="btnTheme" class="icon-btn" title="Toggle light/dark" aria-label="Toggle light/dark">◐</button>
     <button id="btnSignOut" class="icon-btn" title="Sign out" aria-label="Sign out">⏻</button>
@@ -148,6 +179,16 @@
     </div>
   </div>
 
+  <!-- everything you've shared -->
+  <div id="mediaPanel" class="sheet" hidden>
+    <div class="sheet-head">
+      <b>Shared media</b>
+      <button id="mediaClose" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <div id="mediaGrid" class="media-grid"></div>
+    <div id="mediaEmpty" class="gif-status" hidden>Nothing shared yet.</div>
+  </div>
+
   <!-- GIF picker -->
   <div id="gifPanel" class="gif-panel" hidden>
     <div class="gif-head">
@@ -184,6 +225,7 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V22h-2v-3.07A7 7 0 0 1 5 12a1 1 0 1 1 2 0 5 5 0 0 0 10 0Z"/></svg>
     </button>
   </footer>
+  </div>
 </div>
 
 <!-- reaction picker -->
@@ -202,6 +244,7 @@
 <!-- full-size photo viewer -->
 <div id="lightbox" class="lightbox" hidden>
   <img id="lightboxImg" alt="" />
+  <button id="lightboxSave" class="lightbox-save" title="Save to your device">⤓ Save</button>
 </div>
 
 <div id="toast" class="toast" hidden></div>

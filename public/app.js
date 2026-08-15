@@ -204,7 +204,7 @@ async function start(session) {
 
   $('peerName').textContent = peer?.display_name || 'Waiting for her…';
   paintAvatar($('peerAvatar'), peer);
-  paintAvatar($('btnMe'), mine);
+  paintSelf();
 
   if (lockRequired() && !unlocked()) {
     show('lock');
@@ -246,6 +246,7 @@ function norm(r) {
     duration: r.duration || 0,
     peaks: r.peaks || [],
     imagePath: r.image_path,
+    videoPath: r.video_path,
     remoteUrl: r.remote_url,
     width: r.width || 0,
     height: r.height || 0,
@@ -274,7 +275,7 @@ async function subscribe() {
         if (p.new.email === myEmail) {
           mine = p.new; // another device of yours changed your name or picture
           myName = mine.display_name;
-          paintAvatar($('btnMe'), mine);
+          paintSelf();
         } else {
           peer = p.new;
           renderPeer();
@@ -415,6 +416,7 @@ function preview(msg) {
   if (!msg) return 'message';
   if (msg.deleted) return 'unsent message';
   if (msg.type === 'voice') return '🎙 Voice mail';
+  if (msg.type === 'video') return '🎬 Video';
   if (msg.type === 'photo') return '🖼 Photo';
   if (msg.type === 'gif') return 'GIF';
   return msg.text || '';
@@ -465,6 +467,11 @@ function paintBubble(bubble, msg) {
   if (msg.replyTo) bubble.append(quoteBlock(msg));
   if (msg.type === 'voice') {
     bubble.append(voiceBody(msg));
+    return;
+  }
+  if (msg.type === 'video') {
+    bubble.classList.add('photo');
+    bubble.append(videoBody(msg));
     return;
   }
   if (msg.type === 'photo' || msg.type === 'gif') {
@@ -643,13 +650,195 @@ function photoBody(msg) {
   return frame;
 }
 
-$('lightbox').onclick = () => {
+$('lightbox').onclick = (e) => {
+  if (e.target.closest('#lightboxSave')) return;
   $('lightbox').hidden = true;
   $('lightboxImg').removeAttribute('src');
+};
+
+$('lightboxSave').onclick = (e) => {
+  e.stopPropagation();
+  const src = $('lightboxImg').src;
+  if (src) saveFile(src, `vamor-${Date.now()}.jpg`);
 };
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('lightbox').hidden) $('lightbox').click();
 });
+
+/* ------------------------------------------------------- video bubble */
+
+/* Starts as a poster frame with a play badge. The clip itself is only
+   fetched once you actually press play, so opening the chat never pulls
+   down tens of megabytes. */
+function videoBody(msg) {
+  const wrap = document.createElement('div');
+  wrap.className = 'frame video-poster';
+  if (msg.width && msg.height) wrap.style.aspectRatio = `${msg.width} / ${msg.height}`;
+
+  const poster = document.createElement('img');
+  poster.alt = 'video';
+  poster.loading = 'lazy';
+  if (msg.imagePath) signedUrl('photos', msg.imagePath).then((u) => (poster.src = u)).catch(() => {});
+
+  const badge = document.createElement('div');
+  badge.className = 'play-badge';
+  badge.textContent = '▶';
+
+  const len = document.createElement('span');
+  len.className = 'video-len';
+  len.textContent = mmss(msg.duration || 0);
+
+  wrap.append(poster, badge, len);
+
+  wrap.onclick = async (e) => {
+    e.stopPropagation();
+    try {
+      const url = await signedUrl('videos', msg.videoPath);
+      const video = document.createElement('video');
+      video.src = url;
+      video.controls = true;
+      video.autoplay = true;
+      video.playsInline = true;
+      if (poster.src) video.poster = poster.src;
+      wrap.replaceWith(video);
+    } catch {
+      toast('Could not open that video');
+    }
+  };
+
+  return wrap;
+}
+
+/* ------------------------------------------------------- send video */
+
+/** Grab the first frame so the bubble has something to show. */
+function posterFrom(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.muted = true;
+    v.playsInline = true;
+
+    const done = (result) => {
+      URL.revokeObjectURL(url);
+      resolve(result);
+    };
+
+    v.onloadeddata = () => {
+      // A hair past zero — the very first frame is often black.
+      v.currentTime = Math.min(0.2, (v.duration || 1) / 2);
+    };
+    v.onseeked = () => {
+      const scale = Math.min(1, 640 / Math.max(v.videoWidth, v.videoHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(v.videoWidth * scale);
+      canvas.height = Math.round(v.videoHeight * scale);
+      canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (blob) =>
+          done({ blob, width: v.videoWidth, height: v.videoHeight, duration: v.duration || 0 }),
+        'image/jpeg',
+        0.8
+      );
+    };
+    v.onerror = () => done(null);
+    setTimeout(() => done(null), 8000); // never hang on an odd codec
+    v.src = url;
+  });
+}
+
+const VIDEO_LIMIT = 50 * 1024 * 1024;
+
+async function sendVideo(file) {
+  if (!file || !file.type.startsWith('video/')) return toast('That is not a video');
+  if (file.size > VIDEO_LIMIT) {
+    return toast(`That video is ${(file.size / 1048576).toFixed(0)}MB — the limit is 50MB`);
+  }
+
+  toast('Uploading video…');
+  const meta = await posterFrom(file);
+
+  // The video itself is never re-encoded, so quality is exactly the original.
+  const ext = (file.name.split('.').pop() || 'mp4').toLowerCase().slice(0, 5);
+  const path = `${myId}/${crypto.randomUUID()}.${ext}`;
+  const up = await sb.storage.from('videos').upload(path, file, { contentType: file.type });
+  if (up.error) return toast('Video failed to upload');
+
+  let posterPath = null;
+  if (meta?.blob) {
+    posterPath = `posters/${myId}/${crypto.randomUUID()}.jpg`;
+    const p = await sb.storage.from('photos').upload(posterPath, meta.blob, {
+      contentType: 'image/jpeg',
+    });
+    if (p.error) posterPath = null;
+  }
+
+  const { error } = await sb.from('messages').insert({
+    sender: myId,
+    sender_name: myName,
+    kind: 'video',
+    video_path: path,
+    image_path: posterPath,
+    width: meta?.width || null,
+    height: meta?.height || null,
+    duration: meta?.duration || null,
+    reply_to: takeReply(),
+  });
+
+  if (error) {
+    sb.storage.from('videos').remove([path]);
+    if (posterPath) sb.storage.from('photos').remove([posterPath]);
+    toast('Video failed to send');
+  }
+}
+
+$('sideVideo').onclick = () => $('videoInput').click();
+$('videoInput').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (file) await sendVideo(file);
+});
+
+/* ------------------------------------------------------- saving media */
+
+/* Cross-origin URLs ignore the download attribute, so fetch the bytes and
+   hand the browser a local blob instead. */
+async function saveFile(url, filename) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(res.status);
+    const blob = await res.blob();
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = filename;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 10000);
+  } catch {
+    toast('Could not save that file');
+  }
+}
+
+/** Resolve whatever a media message points at into a URL plus a filename. */
+async function mediaUrl(msg) {
+  if (msg.type === 'gif') return { url: msg.remoteUrl, name: `vamor-${msg.id}.gif` };
+  if (msg.type === 'video') {
+    return { url: await signedUrl('videos', msg.videoPath), name: `vamor-${msg.id}.mp4` };
+  }
+  return { url: await signedUrl('photos', msg.imagePath), name: `vamor-${msg.id}.jpg` };
+}
+
+async function saveMedia(msg) {
+  try {
+    const { url, name } = await mediaUrl(msg);
+    await saveFile(url, name);
+  } catch {
+    toast('Could not save that file');
+  }
+}
 
 /* --------------------------------------------------------- send photo */
 
@@ -836,7 +1025,7 @@ $('avatarInput').addEventListener('change', async (e) => {
   }
 
   if (mine) mine.avatar_url = path;
-  paintAvatar($('btnMe'), mine);
+  paintSelf();
   paintAvatar($('profilePic'), mine);
   if (previous) sb.storage.from('photos').remove([previous]); // tidy up the old one
   toast('Picture updated');
@@ -883,7 +1072,7 @@ function applyRoom() {
   $('dim').value = look.bg_dim ?? 0.45;
   $('dimRow').hidden = !look.bg_path;
 
-  const shell = $('chat');
+  const shell = $('main');
   if (!look.bg_path) {
     shell.style.backgroundImage = '';
     shell.classList.remove('has-bg');
@@ -983,10 +1172,79 @@ $('bgInput').addEventListener('change', async (e) => {
   $('lookPanel').hidden = true;
 });
 
+/* ------------------------------------------------------ shared media */
+
+const MEDIA_KINDS = new Set(['photo', 'video', 'gif']);
+
+async function openMedia() {
+  closePanels();
+  $('mediaPanel').hidden = false;
+
+  const items = [...byId.values()]
+    .map((e) => e.msg)
+    .filter((m) => MEDIA_KINDS.has(m.type) && !m.deleted)
+    .reverse(); // newest first
+
+  const grid = $('mediaGrid');
+  grid.replaceChildren();
+  $('mediaEmpty').hidden = items.length > 0;
+
+  for (const msg of items) {
+    const cell = document.createElement('button');
+    cell.title = 'Open';
+
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.alt = preview(msg);
+    if (msg.type === 'gif') img.src = msg.remoteUrl;
+    else if (msg.imagePath) signedUrl('photos', msg.imagePath).then((u) => (img.src = u)).catch(() => {});
+    cell.append(img);
+
+    if (msg.type !== 'photo') {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = msg.type === 'video' ? '🎬' : 'GIF';
+      cell.append(tag);
+    }
+
+    // Jump to it in the conversation, where it can be played or replied to.
+    cell.onclick = () => {
+      $('mediaPanel').hidden = true;
+      jumpTo(msg.id);
+    };
+    grid.append(cell);
+  }
+}
+
+$('btnMedia').onclick = () => ($('mediaPanel').hidden ? openMedia() : ($('mediaPanel').hidden = true));
+$('mediaClose').onclick = () => ($('mediaPanel').hidden = true);
+
+/* -------------------------------------------------- desktop side rail */
+
+/* The rail duplicates controls that live in the header on phones, so it
+   forwards to the same buttons rather than repeating their logic. */
+const forward = (from, to) => ($(from).onclick = () => $(to).click());
+
+forward('sideProfile', 'btnMe');
+forward('sidePhoto', 'btnPhoto');
+forward('sideMedia', 'btnMedia');
+forward('sideGif', 'btnGif');
+forward('sideLook', 'btnLook');
+forward('sideMode', 'btnTheme');
+forward('sideSignOut', 'btnSignOut');
+
+/** Keep the rail's copy of your name and picture in step. */
+function paintSelf() {
+  paintSelf();
+  paintAvatar($('sideAvatar'), mine);
+  $('sideName').textContent = mine?.display_name || 'You';
+}
+
 /** Only one sheet open at a time. */
 function closePanels() {
   $('profilePanel').hidden = true;
   $('lookPanel').hidden = true;
+  $('mediaPanel').hidden = true;
   closeGifPanel();
 }
 
@@ -996,7 +1254,10 @@ function closePanels() {
    they stay animated, cost nothing, and Giphy's assets are public anyway. */
 
 const GIPHY = cfg.GIPHY_API_KEY;
-if (GIPHY) $('btnGif').hidden = false;
+if (GIPHY) {
+  $('btnGif').hidden = false;
+  $('sideGif').hidden = false;
+}
 
 let gifTimer = null;
 let gifSeq = 0;
@@ -1085,6 +1346,20 @@ function openReactions(e, msg) {
 
   box.querySelector('.trash')?.remove();
   box.querySelector('.pencil')?.remove();
+  box.querySelector('.saver')?.remove();
+
+  // Anything with a file behind it can be kept.
+  if (MEDIA_KINDS.has(msg.type)) {
+    const s = document.createElement('button');
+    s.className = 'tool saver';
+    s.title = 'Save to your device';
+    s.textContent = '⤓';
+    s.onclick = () => {
+      box.hidden = true;
+      saveMedia(msg);
+    };
+    box.append(s);
+  }
 
   // Only your own words can be corrected.
   if (msg.mine && msg.type === 'text') {
@@ -1199,6 +1474,7 @@ async function unsend(msg) {
   // orphaned file that nothing links to.
   if (msg.audioPath) sb.storage.from('voice').remove([msg.audioPath]);
   if (msg.imagePath) sb.storage.from('photos').remove([msg.imagePath]);
+  if (msg.videoPath) sb.storage.from('videos').remove([msg.videoPath]);
 }
 
 /* ------------------------------------------------------------- toast */

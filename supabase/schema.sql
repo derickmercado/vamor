@@ -76,9 +76,13 @@ alter table public.messages add column if not exists reply_to  bigint
   references public.messages(id) on delete set null;
 alter table public.messages add column if not exists edited_at timestamptz;
 
+-- Videos are stored untouched for quality; image_path doubles as the poster
+-- frame so galleries and bubbles can show a still without fetching the file.
+alter table public.messages add column if not exists video_path text;
+
 alter table public.messages drop constraint if exists messages_kind_check;
 alter table public.messages add  constraint messages_kind_check
-  check (kind in ('text', 'voice', 'photo', 'gif'));
+  check (kind in ('text', 'voice', 'photo', 'gif', 'video'));
 
 -- A row always carries exactly the payload its kind promises.
 alter table public.messages drop constraint if exists has_content;
@@ -86,7 +90,8 @@ alter table public.messages add  constraint has_content check (
   (kind = 'text'  and body       is not null) or
   (kind = 'voice' and audio_path is not null) or
   (kind = 'photo' and image_path is not null) or
-  (kind = 'gif'   and remote_url is not null)
+  (kind = 'gif'   and remote_url is not null) or
+  (kind = 'video' and video_path is not null)
 );
 
 -- ------------------------------------------------------------------- room
@@ -269,3 +274,26 @@ create policy "members upload photos"
 create policy "members delete photos"
   on storage.objects for delete
   using (bucket_id = 'photos' and owner = auth.uid());
+
+-- Videos, uploaded as-is so quality is untouched. 50MB is the ceiling the
+-- free plan allows per file; raise file_size_limit if you upgrade.
+
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('videos', 'videos', false, 52428800)
+on conflict (id) do update set file_size_limit = excluded.file_size_limit;
+
+drop policy if exists "members read videos"   on storage.objects;
+drop policy if exists "members upload videos" on storage.objects;
+drop policy if exists "members delete videos" on storage.objects;
+
+create policy "members read videos"
+  on storage.objects for select
+  using (bucket_id = 'videos' and public.is_member());
+
+create policy "members upload videos"
+  on storage.objects for insert
+  with check (bucket_id = 'videos' and public.is_member());
+
+create policy "members delete videos"
+  on storage.objects for delete
+  using (bucket_id = 'videos' and owner = auth.uid());
