@@ -42,9 +42,11 @@
     <form id="codeForm" hidden>
       <p class="sub">Check <b id="sentTo"></b> — tap the link in the email.</p>
       <label class="field">
-        <span>Or type the 6-digit code from that email</span>
+        <!-- Length depends on the project's OTP setting (6–10), so don't
+             promise a number here or cap the field below it. -->
+        <span>Or type the code from that email</span>
         <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code"
-               pattern="[0-9]*" maxlength="6" placeholder="123456" />
+               pattern="[0-9]*" maxlength="10" placeholder="12345678" />
       </label>
       <button type="submit" class="btn-primary">Sign in</button>
       <button type="button" id="backToEmail" class="btn-link">Use a different email</button>

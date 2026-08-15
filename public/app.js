@@ -101,8 +101,10 @@ $('emailForm').addEventListener('submit', async (e) => {
 
 $('codeForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const token = $('code').value.trim();
-  if (token.length !== 6) return authError('That code should be 6 digits.');
+  // Strip spaces and anything pasted around it; Supabase issues 6–10 digits
+  // depending on the project setting, so don't assume a fixed length.
+  const token = $('code').value.replace(/\D/g, '');
+  if (token.length < 6) return authError('That code looks too short.');
   const btn = $('codeForm').querySelector('button');
   btn.disabled = true;
   btn.textContent = 'Signing in…';
