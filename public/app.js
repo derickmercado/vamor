@@ -179,13 +179,61 @@ sb.auth.onAuthStateChange((event, session) => {
   show('auth');
 })();
 
+/** Never let a stalled request leave the splash spinning forever. */
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out`)), ms)),
+  ]);
+}
+
 async function start(session) {
+  try {
+    await startInner(session);
+  } catch (err) {
+    stuck(err?.message || 'Something went wrong while opening the chat.');
+  }
+}
+
+/** Splash is a dead end when something fails, so give it a way out. */
+function stuck(message) {
+  show('auth');
+  $('emailForm').hidden = true;
+  $('codeForm').hidden = true;
+  $('authNote').hidden = false;
+  $('authNote').textContent = message;
+  $('authError').hidden = false;
+  $('authError').innerHTML =
+    '<button id="retry" class="btn-link">Try again</button> · ' +
+    '<button id="bail" class="btn-link">Sign out</button>';
+  $('retry').onclick = () => location.reload();
+  $('bail').onclick = async () => {
+    await sb.auth.signOut();
+    location.reload();
+  };
+}
+
+// If we are still on the splash well after load, something silently stalled.
+setTimeout(() => {
+  if (!$('splash').hidden) stuck('This is taking longer than it should.');
+}, 12000);
+
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('unhandled', e.reason);
+  if (!$('splash').hidden) stuck(String(e.reason?.message || e.reason || 'Unexpected error'));
+});
+
+async function startInner(session) {
   myId = session.user.id;
   myEmail = (session.user.email || '').toLowerCase();
   show('splash');
 
   // The `members` table is the allowlist. If RLS hides it, you're not on it.
-  const { data: members, error } = await sb.from('members').select('*');
+  const { data: members, error } = await withTimeout(
+    sb.from('members').select('*'),
+    15000,
+    'Loading your profile'
+  );
 
   if (error || !members?.length) {
     show('auth');
@@ -287,7 +335,18 @@ async function subscribe() {
           applyRoom();
         }
       })
-      .subscribe((status) => status === 'SUBSCRIBED' && resolve());
+      // Resolve on failure too. A realtime channel that cannot connect must
+      // not block the conversation from being read — it only costs live
+      // updates, and the initial load still works.
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') return resolve();
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn('realtime:', status);
+          resolve();
+        }
+      });
+
+    setTimeout(resolve, 8000); // belt and braces: never wait forever
   });
 }
 
