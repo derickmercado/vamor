@@ -37,12 +37,12 @@ window.VAMOR_CONFIG = {
   LOCK_GRACE_SECONDS: 0,
 
   /**
-   * Also re-lock after this many minutes of no typing, tapping or scrolling,
+   * Also re-lock after this many seconds of no typing, tapping or scrolling,
    * even with the app open in front of you. 0 turns idle locking off.
    * Recording and media playback hold it off, so a long voice note or video
    * won't lock mid-way.
    */
-  IDLE_LOCK_MINUTES: 5,
+  IDLE_LOCK_SECONDS: 15,
 
   /**
    * Giphy API key, for the GIF search button. Free: sign in at

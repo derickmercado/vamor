@@ -196,7 +196,7 @@ function relock() {
 
 /* ------------------------------------------------------- idle locking */
 
-const IDLE_MS = Math.max(0, Number(cfg.IDLE_LOCK_MINUTES) || 0) * 60000;
+const IDLE_MS = Math.max(0, Number(cfg.IDLE_LOCK_SECONDS) || 0) * 1000;
 let idleTimer = null;
 
 /** Don't lock out from under someone mid voice note or mid video. */
