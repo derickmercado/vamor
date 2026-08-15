@@ -24,6 +24,19 @@ window.VAMOR_CONFIG = {
   PASSPHRASE_SHA256: 'fc0eb3f2ef3bce789df7e5a09438023e4ae0198cfc8f2f8461f31bd0261214b6',
 
   /**
+   * Re-lock when the app is hidden — another tab, another app, screen off,
+   * or the browser closed. Set to false to stay unlocked until the tab closes.
+   */
+  LOCK_ON_HIDE: true,
+
+  /**
+   * Seconds of being hidden before it actually re-locks. 0 locks the instant
+   * you look away. A few seconds is friendlier if you flick between tabs a
+   * lot, and still locks whenever you genuinely leave.
+   */
+  LOCK_GRACE_SECONDS: 0,
+
+  /**
    * Giphy API key, for the GIF search button. Free: sign in at
    * developers.giphy.com, "Create an App", pick the API option, copy the key.
    * Leave it empty and the GIF button simply doesn't appear — you can still

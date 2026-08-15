@@ -166,6 +166,46 @@ $('lockSignOut').onclick = async () => {
   location.reload();
 };
 
+/* --------------------------------------------------- re-lock when hidden */
+
+/* Choosing a file, taking a photo or granting the microphone hands control
+   to the OS, which hides the page. That is us, not the user walking away —
+   locking there would strand them mid-upload. */
+let osDialogOpen = false;
+
+function viaOsDialog(input) {
+  osDialogOpen = true;
+  input.click();
+}
+
+window.addEventListener('focus', () => setTimeout(() => (osDialogOpen = false), 800));
+
+let lockTimer = null;
+
+function relock() {
+  sessionStorage.removeItem('vamor.unlocked');
+  if ($('chat').hidden) return; // already away from the conversation
+  closePanels();
+  $('lightbox').hidden = true;
+  $('reactions').hidden = true;
+  $('passphrase').value = '';
+  $('lockError').hidden = true;
+  show('lock');
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!lockRequired() || cfg.LOCK_ON_HIDE === false) return;
+
+  if (document.visibilityState === 'hidden') {
+    if (osDialogOpen) return;
+    const grace = Math.max(0, Number(cfg.LOCK_GRACE_SECONDS) || 0) * 1000;
+    clearTimeout(lockTimer);
+    lockTimer = grace ? setTimeout(relock, grace) : (relock(), null);
+  } else {
+    clearTimeout(lockTimer); // came back inside the grace period
+  }
+});
+
 /* ---------------------------------------------------------------- boot */
 
 sb.auth.onAuthStateChange((event, session) => {
@@ -999,7 +1039,7 @@ async function sendVideo(file) {
   }
 }
 
-$('sideVideo').onclick = () => $('videoInput').click();
+$('sideVideo').onclick = () => viaOsDialog($('videoInput'));
 $('videoInput').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   e.target.value = '';
@@ -1182,8 +1222,8 @@ function openProfile() {
 
 $('btnMe').onclick = () => ($('profilePanel').hidden ? openProfile() : ($('profilePanel').hidden = true));
 $('profileClose').onclick = () => ($('profilePanel').hidden = true);
-$('profilePic').onclick = () => $('avatarInput').click();
-$('profilePicBtn').onclick = () => $('avatarInput').click();
+$('profilePic').onclick = () => viaOsDialog($('avatarInput'));
+$('profilePicBtn').onclick = () => viaOsDialog($('avatarInput'));
 
 $('profileSave').onclick = async () => {
   const name = $('nameInput').value.trim().slice(0, 24);
@@ -1237,7 +1277,7 @@ $('avatarInput').addEventListener('change', async (e) => {
   toast('Picture updated');
 });
 
-$('btnPhoto').onclick = () => $('fileInput').click();
+$('btnPhoto').onclick = () => viaOsDialog($('fileInput'));
 $('fileInput').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   e.target.value = ''; // let the same file be picked twice
@@ -1349,7 +1389,7 @@ $('dim').addEventListener('input', () => {
 });
 $('dim').addEventListener('change', () => saveRoom({ bg_dim: Number($('dim').value) }));
 
-$('bgBtn').onclick = () => $('bgInput').click();
+$('bgBtn').onclick = () => viaOsDialog($('bgInput'));
 $('bgClear').onclick = async () => {
   const old = look.bg_path;
   await saveRoom({ bg_path: null });
@@ -2005,6 +2045,8 @@ $('thread').addEventListener('scroll', () => {
 let readSent = 0;
 function markRead() {
   if (!lastId || lastId === readSent) return;
+  // Behind the lock screen you haven't actually seen anything yet.
+  if (!$('lock').hidden) return;
   readSent = lastId;
   sb.from('members')
     .update({ last_read: lastId, updated_at: new Date().toISOString() })
