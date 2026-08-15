@@ -29,7 +29,7 @@ window.VAMOR_CONFIG = {
    * Leave it empty and the GIF button simply doesn't appear — you can still
    * send .gif files with the picture button.
    */
-  GIPHY_API_KEY: '',
+  GIPHY_API_KEY: 'g2wRTf09H9PvPkJBUMKQo092amepEBWG',
 
   SUPABASE_URL: 'https://vyxwgavernclkzauntlk.supabase.co',
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5eHdnYXZlcm5jbGt6YXVudGxrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY3OTg4NjMsImV4cCI6MjEwMjM3NDg2M30.ii5k3TIjQpTXkm7HIdEkbGwzzd6fhghlcDG_g4mhJsY',
