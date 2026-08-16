@@ -1184,7 +1184,7 @@ async function loadBitmap(file) {
   }
 }
 
-async function sendPhoto(file) {
+async function sendPhoto(file, { quiet = false } = {}) {
   if (!file || !file.type.startsWith('image/')) return toast('That is not an image');
   if (file.size > 25e6) return toast('That picture is too big');
 
@@ -1217,7 +1217,11 @@ async function sendPhoto(file) {
   if (error) {
     sb.storage.from('photos').remove([path]);
     toast('Picture failed to send');
-  } else notifyPeer();
+    return false;
+  }
+  // A batch buzzes once at the end rather than once per picture.
+  if (!quiet) notifyPeer();
+  return true;
 }
 
 /* --------------------------------------------------- profile pictures */
@@ -1322,10 +1326,30 @@ $('avatarInput').addEventListener('change', async (e) => {
 });
 
 $('btnPhoto').onclick = () => viaOsDialog($('fileInput'));
+
+/* Pictures go up one at a time rather than all at once: it keeps them in the
+   order you picked them, and a phone uploading twenty in parallel tends to
+   stall on the slowest of them. */
+const MAX_BULK = 30;
+
 $('fileInput').addEventListener('change', async (e) => {
-  const file = e.target.files?.[0];
+  const files = [...(e.target.files || [])];
   e.target.value = ''; // let the same file be picked twice
-  if (file) await sendPhoto(file);
+  if (!files.length) return;
+
+  if (files.length === 1) return void sendPhoto(files[0]);
+
+  const batch = files.slice(0, MAX_BULK);
+  if (files.length > MAX_BULK) toast(`Sending the first ${MAX_BULK} of ${files.length}`);
+
+  let done = 0;
+  for (const [i, file] of batch.entries()) {
+    toast(`Sending ${i + 1} of ${batch.length}…`);
+    if (await sendPhoto(file, { quiet: true })) done++;
+  }
+
+  if (done) notifyPeer();
+  toast(done === batch.length ? `Sent ${done} pictures` : `Sent ${done} of ${batch.length}`);
 });
 
 // Paste a screenshot straight into the conversation.
