@@ -2293,8 +2293,17 @@ function watchLive() {
   guestPc = new RTCPeerConnection(ICE);
 
   guestPc.ontrack = (e) => {
-    $('liveVideo').srcObject = e.streams[0];
+    const v = $('liveVideo');
+    v.srcObject = e.streams[0];
     $('liveStatus').textContent = 'Live';
+
+    // The stream arrives after the tap, and autoplay alone is unreliable on
+    // phones. Tapping Watch is a user gesture, so sound is allowed; if the
+    // browser still refuses, let the video itself be the play button.
+    v.play().catch(() => {
+      $('liveStatus').textContent = 'Tap the video to play';
+      v.addEventListener('click', () => v.play().catch(() => {}), { once: true });
+    });
   };
   guestPc.onicecandidate = (e) =>
     e.candidate && send('ice', { candidate: e.candidate, role: 'guest' });
