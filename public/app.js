@@ -47,26 +47,22 @@ $('btnTheme').onclick = () => {
 
 /* Phone keyboards shrink the visual viewport without changing 100dvh on some
    browsers, which pushes the composer under the keyboard. Track it directly. */
+/* No height is computed here on purpose.
+ *
+ * Driving the layout from visualViewport collapsed the chat on both Android
+ * and iOS: the composer ended up near the top with an empty gap beneath it.
+ * body is position:fixed inset:0, so it already matches the layout viewport,
+ * and .screen is height:100% of that — the browser keeps both correct on its
+ * own, including when the keyboard opens.
+ *
+ * The only thing still worth doing is keeping the newest message in view as
+ * the keyboard animates in.
+ */
 const vv = window.visualViewport;
 if (vv) {
-  const fit = () => {
-    const layout = document.documentElement.clientHeight;
-
-    // Chrome on Android shrinks the layout for the keyboard by itself (see
-    // interactive-widget in the viewport meta). Overriding --vh there would
-    // subtract the keyboard twice and collapse the chat. iOS does not shrink
-    // it, so there we still have to.
-    if (layout - vv.height < 60) {
-      document.documentElement.style.removeProperty('--vh'); // falls back to 100dvh
-    } else {
-      document.documentElement.style.setProperty('--vh', `${vv.height}px`);
-    }
-
+  vv.addEventListener('resize', () => {
     if (scrollPinned) scrollDown(true);
-  };
-  vv.addEventListener('resize', fit);
-  vv.addEventListener('scroll', fit);
-  fit();
+  });
 }
 
 $('input').addEventListener('focus', () => setTimeout(() => scrollDown(true), 250));

@@ -50,15 +50,14 @@ body {
 button, input { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: none; }
 
-/* body is position:fixed inset:0, so it *is* the layout viewport — which
-   Chrome shrinks for the keyboard (see interactive-widget in the viewport
-   meta). Tracking it with 100% therefore needs no JS and no guessing.
-   `dvh` is wrong here: by definition it ignores the keyboard, so falling back
-   to it left the chat taller than the visible area. `--vh` is only set on
-   browsers that don't shrink the layout at all, which is iOS. */
+/* body is position:fixed inset:0, so it *is* the layout viewport, and the
+   browser resizes that for the keyboard itself (see interactive-widget in the
+   viewport meta). 100% therefore tracks it with no JS and nothing to guess.
+   An earlier version drove this from visualViewport and collapsed the chat on
+   both platforms; dvh is no good either, since it ignores the keyboard by
+   definition. */
 .screen {
   height: 100%;
-  height: var(--vh, 100%);
   display: flex;
   flex-direction: column;
   max-width: 720px;
