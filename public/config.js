@@ -56,6 +56,21 @@ window.VAMOR_CONFIG = {
   NOTIFY_BODY: 'Weather for today.....',
 
   /**
+   * How the two browsers find each other for screen sharing.
+   *
+   * STUN alone is free and works whenever a direct connection is possible,
+   * which covers most home Wi-Fi. If streaming connects at home but fails on
+   * mobile data, the network is blocking direct connections and you need a
+   * TURN relay, which costs a few dollars a month (Metered, Twilio, or your
+   * own coturn). Add it as a second entry:
+   *
+   *   { urls: 'turn:your.turn.host:3478', username: '...', credential: '...' }
+   */
+  ICE_SERVERS: [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  ],
+
+  /**
    * Public half of the VAPID keypair, for push notifications. Safe to ship —
    * it only identifies the sender. The private half lives in the Supabase
    * Edge Function's secrets and must never appear here.

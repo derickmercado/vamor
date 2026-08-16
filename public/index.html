@@ -100,6 +100,7 @@
       <button id="sideMedia"><span class="side-ic">🗂</span>Shared media</button>
       <button id="sideGif" hidden><span class="side-ic">🎞</span>Send a GIF</button>
       <button id="sideLook"><span class="side-ic">🎨</span>Chat theme</button>
+      <button id="sideLive"><span class="side-ic">🔴</span><span id="sideLiveLabel">Share your screen</span></button>
       <button id="sidePush"><span class="side-ic">🔔</span>Turn on notifications</button>
       <button id="sideMode"><span class="side-ic">◐</span>Light / dark</button>
     </nav>
@@ -133,6 +134,13 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11 3h2v10h-2V3Zm5.6 2.1a9 9 0 1 1-9.2 0l1 1.7a7 7 0 1 0 7.2 0l1-1.7Z"/></svg>
     </button>
   </header>
+
+  <!-- shown to the other person while a stream is running -->
+  <div id="liveBanner" class="live-banner" hidden>
+    <span class="live-dot"></span>
+    <span id="liveText">Live now</span>
+    <button id="liveWatch" class="live-watch">Watch</button>
+  </div>
 
   <main id="thread" class="thread">
     <div id="olderRow" class="older-row" hidden>
@@ -261,6 +269,17 @@
   <button data-e="" class="clear">✕</button>
   <span class="reactions-sep"></span>
   <button id="btnReply" class="tool" title="Reply">↩</button>
+</div>
+
+<!-- watching a stream -->
+<div id="liveView" class="live-view" hidden>
+  <video id="liveVideo" playsinline autoplay></video>
+  <div class="live-bar">
+    <span class="live-dot"></span>
+    <span id="liveStatus">Connecting…</span>
+    <button id="liveFull" class="live-btn">Fullscreen</button>
+    <button id="liveClose" class="live-btn">Leave</button>
+  </div>
 </div>
 
 <!-- full-size photo viewer -->

@@ -351,6 +351,7 @@ async function openChat() {
   await loadRoom();
   await loadMessages();
   joinRoom();
+  joinSignalling();
   heartbeat();
   checkPush();
   $('input').focus();
@@ -2159,6 +2160,188 @@ function heartbeat() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') markRead();
 });
+
+/* ------------------------------------------------------ screen sharing */
+
+/* Video goes straight from one browser to the other — it never passes
+   through Supabase, so it costs nothing against storage or egress. All that
+   travels through Realtime is the handshake: a few kilobytes of connection
+   details.
+ *
+ * Only a desktop can capture a screen; phones can watch but not share.
+ */
+
+const ICE = {
+  iceServers: cfg.ICE_SERVERS || [{ urls: 'stun:stun.l.google.com:19302' }],
+};
+
+let sig = null; // signalling channel
+let hostPc = null; // my connection, when I'm sharing
+let hostStream = null;
+let guestPc = null; // my connection, when I'm watching
+let peerLive = false;
+
+const canShare = () => !!navigator.mediaDevices?.getDisplayMedia;
+
+function send(kind, extra = {}) {
+  sig?.send({ type: 'broadcast', event: 'sig', payload: { kind, from: myId, ...extra } });
+}
+
+function joinSignalling() {
+  sig = sb.channel('rtc', { config: { broadcast: { self: false } } });
+  sig.on('broadcast', { event: 'sig' }, ({ payload }) => onSignal(payload)).subscribe((status) => {
+    // Someone may already be streaming when we arrive.
+    if (status === 'SUBSCRIBED') send('who-live');
+  });
+}
+
+async function onSignal(m) {
+  if (!m || m.from === myId) return;
+
+  switch (m.kind) {
+    case 'who-live':
+      if (hostStream) send('live-start');
+      break;
+
+    case 'live-start':
+      peerLive = true;
+      paintLive();
+      break;
+
+    case 'live-stop':
+      peerLive = false;
+      paintLive();
+      closeWatch();
+      break;
+
+    // A viewer asked to watch — build them a connection.
+    case 'want-offer': {
+      if (!hostStream) return;
+      hostPc?.close();
+      hostPc = new RTCPeerConnection(ICE);
+      hostStream.getTracks().forEach((t) => hostPc.addTrack(t, hostStream));
+      hostPc.onicecandidate = (e) =>
+        e.candidate && send('ice', { candidate: e.candidate, role: 'host' });
+
+      await hostPc.setLocalDescription(await hostPc.createOffer());
+      send('offer', { sdp: hostPc.localDescription });
+      break;
+    }
+
+    case 'offer': {
+      if (!guestPc) return;
+      await guestPc.setRemoteDescription(m.sdp);
+      await guestPc.setLocalDescription(await guestPc.createAnswer());
+      send('answer', { sdp: guestPc.localDescription });
+      break;
+    }
+
+    case 'answer':
+      if (hostPc && !hostPc.currentRemoteDescription) await hostPc.setRemoteDescription(m.sdp);
+      break;
+
+    case 'ice': {
+      // Take candidates from the other end of my own connection only.
+      const pc = m.role === 'host' ? guestPc : hostPc;
+      try {
+        await pc?.addIceCandidate(m.candidate);
+      } catch {
+        /* candidates can arrive before the description; harmless */
+      }
+      break;
+    }
+  }
+}
+
+/* ------------------------------------------------------------ sharing */
+
+async function goLive() {
+  if (hostStream) return stopLive();
+  if (!canShare()) return toast('Screen sharing only works on a computer');
+
+  try {
+    hostStream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: 30 } },
+      audio: true, // tick "share audio" in the picker for game sound
+    });
+  } catch {
+    return; // they cancelled the picker
+  }
+
+  // The browser's own "Stop sharing" bar must end the stream too.
+  hostStream.getVideoTracks()[0].addEventListener('ended', stopLive);
+
+  send('live-start');
+  paintLive();
+  notifyPeer();
+  toast('You are sharing your screen');
+}
+
+function stopLive() {
+  hostStream?.getTracks().forEach((t) => t.stop());
+  hostStream = null;
+  hostPc?.close();
+  hostPc = null;
+  send('live-stop');
+  paintLive();
+}
+
+/* ----------------------------------------------------------- watching */
+
+function watchLive() {
+  if (guestPc) return;
+  guestPc = new RTCPeerConnection(ICE);
+
+  guestPc.ontrack = (e) => {
+    $('liveVideo').srcObject = e.streams[0];
+    $('liveStatus').textContent = 'Live';
+  };
+  guestPc.onicecandidate = (e) =>
+    e.candidate && send('ice', { candidate: e.candidate, role: 'guest' });
+
+  guestPc.onconnectionstatechange = () => {
+    const s = guestPc?.connectionState;
+    if (s === 'connected') $('liveStatus').textContent = 'Live';
+    if (s === 'failed') {
+      // Almost always a network with no direct path and no TURN configured.
+      $('liveStatus').textContent = 'Could not connect';
+      toast('Could not connect — this network may need a TURN relay');
+    }
+  };
+
+  $('liveStatus').textContent = 'Connecting…';
+  $('liveView').hidden = false;
+  send('want-offer');
+}
+
+function closeWatch() {
+  guestPc?.close();
+  guestPc = null;
+  $('liveVideo').srcObject = null;
+  $('liveView').hidden = true;
+}
+
+function paintLive() {
+  const sharing = !!hostStream;
+  $('sideLiveLabel').textContent = sharing ? 'Stop sharing' : 'Share your screen';
+  $('sideLive').classList.toggle('on', sharing);
+
+  // Don't offer to watch your own stream.
+  $('liveBanner').hidden = !peerLive || sharing;
+  $('liveText').textContent = `${peer?.display_name || 'She'} is sharing a screen`;
+}
+
+$('sideLive').onclick = goLive;
+$('liveWatch').onclick = watchLive;
+$('liveClose').onclick = closeWatch;
+$('liveFull').onclick = () => {
+  const v = $('liveVideo');
+  if (document.fullscreenElement) document.exitFullscreen();
+  else (v.requestFullscreen || v.webkitEnterFullscreen)?.call(v);
+};
+
+// Leaving without saying so would strand the other side on a dead banner.
+window.addEventListener('pagehide', () => hostStream && send('live-stop'));
 
 /* --------------------------------------------------- push notifications */
 
