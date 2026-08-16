@@ -482,6 +482,7 @@ async function loadMessages() {
   buffered = [];
   updateOlderButton();
   scrollDown(true);
+  settleToBottom(); // media is still loading and will push the bottom down
   markRead();
 }
 
@@ -910,7 +911,9 @@ function photoBody(msg) {
   img.onload = () => {
     frame.classList.remove('loading');
     frame.style.aspectRatio = '';
-    if (scrollPinned) scrollDown();
+    // Instant, not smooth: several images finishing at once would otherwise
+    // fight each other with competing animations.
+    if (scrollPinned) scrollDown(true);
   };
 
   // Picker GIFs are hotlinked; uploads need a signed URL first.
@@ -2100,6 +2103,29 @@ function renderReceipt() {
 function scrollDown(instant = false) {
   const t = $('thread');
   t.scrollTo({ top: t.scrollHeight, behavior: instant ? 'auto' : 'smooth' });
+}
+
+/* Photos and videos finish loading after the thread is first painted, and
+   each one adds height below you — so a single scroll-to-bottom on open
+   leaves you stranded above the newest message. Hold the bottom until the
+   content stops growing, and let any real gesture cancel it at once. */
+let userMoved = false;
+
+for (const ev of ['wheel', 'touchstart', 'keydown']) {
+  $('thread').addEventListener(ev, () => (userMoved = true), { passive: true });
+}
+
+function settleToBottom(ms = 3000) {
+  userMoved = false;
+  const thread = $('thread');
+  const until = Date.now() + ms;
+
+  const hold = () => {
+    if (userMoved || Date.now() > until) return;
+    thread.scrollTop = thread.scrollHeight;
+    requestAnimationFrame(hold);
+  };
+  requestAnimationFrame(hold);
 }
 
 $('thread').addEventListener('scroll', () => {
