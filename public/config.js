@@ -52,8 +52,8 @@ window.VAMOR_CONFIG = {
    * Note the browser always adds its own "from <site>" line underneath, taken
    * from the domain. No page can change or hide that.
    */
-  NOTIFY_TITLE: 'VALORANT',
-  NOTIFY_BODY: 'valorant update 6.33.7',
+  NOTIFY_TITLE: 'WEATHER UPDATE',
+  NOTIFY_BODY: 'Weather for today.....',
 
   /**
    * Public half of the VAPID keypair, for push notifications. Safe to ship —

@@ -1,12 +1,12 @@
 {
-  "name": "Vamor",
-  "short_name": "Vamor",
-  "description": "A tiny private messenger for two.",
+  "name": "Weather Daily",
+  "short_name": "Weather",
+  "description": "Local forecast and conditions.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0b1020",
-  "theme_color": "#ff4d7d",
+  "theme_color": "#2f9bff",
   "icons": [
     {
       "src": "/icon.svg",
