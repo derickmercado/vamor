@@ -50,7 +50,18 @@ $('btnTheme').onclick = () => {
 const vv = window.visualViewport;
 if (vv) {
   const fit = () => {
-    document.documentElement.style.setProperty('--vh', `${vv.height}px`);
+    const layout = document.documentElement.clientHeight;
+
+    // Chrome on Android shrinks the layout for the keyboard by itself (see
+    // interactive-widget in the viewport meta). Overriding --vh there would
+    // subtract the keyboard twice and collapse the chat. iOS does not shrink
+    // it, so there we still have to.
+    if (layout - vv.height < 60) {
+      document.documentElement.style.removeProperty('--vh'); // falls back to 100dvh
+    } else {
+      document.documentElement.style.setProperty('--vh', `${vv.height}px`);
+    }
+
     if (scrollPinned) scrollDown(true);
   };
   vv.addEventListener('resize', fit);
