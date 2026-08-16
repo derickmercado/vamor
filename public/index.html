@@ -103,7 +103,11 @@
     </nav>
 
     <div class="side-foot">
-      <button id="sideSignOut"><span class="side-ic">⏻</span>Sign out</button>
+      <button id="sideSignOut">
+        <span class="side-ic">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M11 3h2v10h-2V3Zm5.6 2.1a9 9 0 1 1-9.2 0l1 1.7a7 7 0 1 0 7.2 0l1-1.7Z"/></svg>
+        </span>Sign out
+      </button>
     </div>
   </aside>
 
@@ -121,7 +125,11 @@
     <button id="btnMedia" class="icon-btn" title="Shared media" aria-label="Shared media">🗂</button>
     <button id="btnLook" class="icon-btn" title="Chat theme" aria-label="Chat theme">🎨</button>
     <button id="btnTheme" class="icon-btn" title="Toggle light/dark" aria-label="Toggle light/dark">◐</button>
-    <button id="btnSignOut" class="icon-btn" title="Sign out" aria-label="Sign out">⏻</button>
+    <!-- SVG, not ⏻: that character has no glyph in many Android fonts and
+         renders as an empty box. -->
+    <button id="btnSignOut" class="icon-btn" title="Sign out" aria-label="Sign out">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11 3h2v10h-2V3Zm5.6 2.1a9 9 0 1 1-9.2 0l1 1.7a7 7 0 1 0 7.2 0l1-1.7Z"/></svg>
+    </button>
   </header>
 
   <main id="thread" class="thread">
