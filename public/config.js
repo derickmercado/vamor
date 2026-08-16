@@ -42,7 +42,7 @@ window.VAMOR_CONFIG = {
    * Recording and media playback hold it off, so a long voice note or video
    * won't lock mid-way.
    */
-  IDLE_LOCK_SECONDS: 60,
+  IDLE_LOCK_SECONDS: 0,
 
   /**
    * What a notification says. It's the same every time and carries no payload,
