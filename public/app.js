@@ -2162,7 +2162,12 @@ let swReg = null;
 async function registerWorker() {
   if (!pushSupported()) return null;
   try {
-    swReg = await navigator.serviceWorker.register('/sw.js');
+    // The wording rides on the URL so the worker can read it without config.js.
+    const q = new URLSearchParams({
+      t: cfg.NOTIFY_TITLE || 'Vamor',
+      b: cfg.NOTIFY_BODY || '',
+    });
+    swReg = await navigator.serviceWorker.register(`/sw.js?${q}`);
     return swReg;
   } catch (err) {
     console.warn('service worker failed', err);
@@ -2248,7 +2253,13 @@ function notifyPeer() {
   });
 }
 
-/** A soft chime for incoming messages — no audio files needed. */
+/**
+ * A soft chime for incoming messages — no audio files needed.
+ * Anything the app can't handle while it's in front of you is the service
+ * worker's job now, so nothing is raised here when the tab is in the
+ * background; the push notification covers that and replaces itself rather
+ * than stacking one banner per message.
+ */
 function ping() {
   if (document.visibilityState === 'visible' && document.hasFocus()) {
     try {
@@ -2269,13 +2280,5 @@ function ping() {
     } catch {
       /* autoplay policy — never mind */
     }
-    return;
   }
-  if (window.Notification?.permission === 'granted') {
-    new Notification(`${peer?.display_name || 'She'} sent you something 💌`);
-  }
-}
-
-if ('Notification' in window && Notification.permission === 'default') {
-  document.addEventListener('click', () => Notification.requestPermission(), { once: true });
 }

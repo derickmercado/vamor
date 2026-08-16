@@ -45,6 +45,17 @@ window.VAMOR_CONFIG = {
   IDLE_LOCK_SECONDS: 60,
 
   /**
+   * What a notification says. It's the same every time and carries no payload,
+   * so nothing about the conversation reaches Apple's or Google's servers —
+   * and a glance at the lock screen gives nothing away either.
+   *
+   * Note the browser always adds its own "from <site>" line underneath, taken
+   * from the domain. No page can change or hide that.
+   */
+  NOTIFY_TITLE: 'VALORANT',
+  NOTIFY_BODY: 'valorant update 6.33.7',
+
+  /**
    * Public half of the VAPID keypair, for push notifications. Safe to ship —
    * it only identifies the sender. The private half lives in the Supabase
    * Edge Function's secrets and must never appear here.

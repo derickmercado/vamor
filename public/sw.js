@@ -3,8 +3,12 @@
  * is closed. It caches nothing; the app is always fetched fresh.
  */
 
-const TITLE = 'Vamor';
-const BODY = 'AAAAAAAAAA';
+/* The wording comes from the registration URL, so it can be changed in
+   config.js without editing this file. A worker can't read config.js itself —
+   it runs in its own context with no access to the page. */
+const params = new URL(self.location.href).searchParams;
+const TITLE = params.get('t') || 'Vamor';
+const BODY = params.get('b') || '';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
