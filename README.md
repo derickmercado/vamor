@@ -104,6 +104,9 @@ Serves `public/` against the same Supabase project. Nothing else to install.
 - **Reactions** — long-press (or right-click) any bubble.
 - **Unsend** — long-press your own message and hit 🗑. Removes the audio file
   from storage too.
+- **Pin** — long-press any message and hit 📌 to hold it in a banner above the
+  thread, for both of you. Tap the banner to jump back to it, `✕` to unpin.
+  One at a time: pinning something else replaces it, and unsending clears it.
 - Day separators, message grouping, a soft chime on arrival, desktop
   notifications when the tab is backgrounded, dark/light theme.
 - Mobile-first: tracks the on-screen keyboard via `visualViewport`, respects

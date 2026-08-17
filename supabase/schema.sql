@@ -110,6 +110,12 @@ insert into public.room (id) values (1) on conflict (id) do nothing;
 -- How strongly the background picture is dimmed, so bubbles stay readable.
 alter table public.room add column if not exists bg_dim real not null default 0.45;
 
+-- One message can be held at the top of the thread — the thing worth keeping
+-- in sight. It lives on the room rather than the message so there is only
+-- ever one, and so both of you see the same one. Unsending it clears it.
+alter table public.room add column if not exists pinned_id bigint
+  references public.messages(id) on delete set null;
+
 -- ------------------------------------------------------------ push subs
 -- One row per browser that agreed to notifications. The Edge Function reads
 -- these with the service role; neither of you can read the other's.

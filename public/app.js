@@ -481,6 +481,7 @@ async function loadMessages() {
   painted = true;
   buffered.forEach(applyRow);
   buffered = [];
+  renderPin(); // the room loaded first, so the pin has bubbles to read only now
   updateOlderButton();
   scrollDown(true);
   settleToBottom(); // media is still loading and will push the bottom down
@@ -769,6 +770,9 @@ function updateMessage(patch) {
     if (msg.reaction) bubble.append(reactionChip(msg.reaction));
     el.classList.toggle('reacted', !!msg.reaction);
   }
+
+  // An edit rewrites the banner; an unsend takes it down.
+  if (look.pinned_id === patch.id) renderPin();
 }
 
 function reactionChip(emoji) {
@@ -1379,6 +1383,7 @@ const THEMES = [
 let look = { theme: 'default', bg_path: null };
 
 function applyRoom() {
+  renderPin(); // before the early return below — the pin is not background-dependent
   document.documentElement.dataset.chatTheme = look.theme || 'default';
   [...$('swatches').children].forEach((s) => s.classList.toggle('on', s.dataset.id === look.theme));
   $('bgClear').hidden = !look.bg_path;
@@ -1403,6 +1408,56 @@ function applyRoom() {
     });
 }
 
+/* --------------------------------------------------------- pinned message */
+
+/* The pin rides on the room row, so it arrives through the same realtime
+   update the theme does and both of you always see the same one. */
+
+/* It can also sit above the loaded window, in which case there is no bubble
+   to read the preview off — remember what the last lookup found. */
+let pinPreview = { id: null, text: '' };
+
+function renderPin() {
+  const id = look.pinned_id || null;
+
+  if (!id) {
+    $('pinBanner').hidden = true;
+    pinPreview = { id: null, text: '' };
+    return;
+  }
+
+  const msg = byId.get(id)?.msg;
+  if (msg?.deleted) return setPinned(null); // unsent — nothing left to hold up
+
+  if (msg) pinPreview = { id, text: preview(msg) };
+  else if (pinPreview.id !== id) {
+    pinPreview = { id, text: 'Pinned message' };
+    lookUpPin(id);
+  }
+
+  $('pinText').textContent = pinPreview.text;
+  $('pinBanner').hidden = false;
+}
+
+/** Read the preview straight from the database for a pin scrolled out of range. */
+async function lookUpPin(id) {
+  const { data } = await sb.from('messages').select('*').eq('id', id).maybeSingle();
+  if (!data || look.pinned_id !== id) return; // it changed while we were asking
+  pinPreview = { id, text: preview(norm(data)) };
+  $('pinText').textContent = pinPreview.text;
+}
+
+const setPinned = (id) => saveRoom({ pinned_id: id }, id ? 'the pin' : 'the change');
+
+$('pinJump').onclick = () => {
+  const id = look.pinned_id;
+  if (!id) return;
+  if (byId.has(id)) jumpTo(id);
+  else toast('Load earlier messages to see it');
+};
+
+$('pinClear').onclick = () => setPinned(null);
+
 /** The veil has to match the current light/dark palette, not a fixed colour. */
 function veilColor() {
   const dim = Math.min(0.9, Math.max(0, look.bg_dim ?? 0.45));
@@ -1424,14 +1479,14 @@ function buildSwatches() {
   }
 }
 
-async function saveRoom(patch) {
+async function saveRoom(patch, what = 'the theme') {
   look = { ...look, ...patch };
   applyRoom();
   const { error } = await sb
     .from('room')
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq('id', 1);
-  if (error) toast('Could not save the theme');
+  if (error) toast(`Could not save ${what}`);
 }
 
 async function loadRoom() {
@@ -1662,6 +1717,20 @@ function openReactions(e, msg) {
   box.querySelector('.trash')?.remove();
   box.querySelector('.pencil')?.remove();
   box.querySelector('.saver')?.remove();
+  box.querySelector('.pinner')?.remove();
+
+  // Either of you can hold a message at the top, and either can let it go.
+  const isPinned = look.pinned_id === msg.id;
+  const pin = document.createElement('button');
+  pin.className = 'tool pinner';
+  pin.classList.toggle('on', isPinned);
+  pin.title = isPinned ? 'Unpin' : 'Pin to the top';
+  pin.textContent = '📌';
+  pin.onclick = () => {
+    box.hidden = true;
+    setPinned(isPinned ? null : msg.id);
+  };
+  box.append(pin);
 
   // Anything with a file behind it can be kept.
   if (MEDIA_KINDS.has(msg.type)) {

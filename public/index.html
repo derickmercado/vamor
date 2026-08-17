@@ -135,6 +135,18 @@
     </button>
   </header>
 
+  <!-- the one message being held at the top of the thread -->
+  <div id="pinBanner" class="pin-banner" hidden>
+    <button id="pinJump" class="pin-jump" title="Go to the pinned message">
+      <span class="pin-mark" aria-hidden="true">📌</span>
+      <span class="pin-body">
+        <b>Pinned</b>
+        <span id="pinText"></span>
+      </span>
+    </button>
+    <button id="pinClear" class="pin-clear" title="Unpin" aria-label="Unpin">✕</button>
+  </div>
+
   <!-- shown to the other person while a stream is running -->
   <div id="liveBanner" class="live-banner" hidden>
     <span class="live-dot"></span>
