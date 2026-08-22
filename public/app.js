@@ -208,9 +208,13 @@ function relock() {
 const IDLE_MS = Math.max(0, Number(cfg.IDLE_LOCK_SECONDS) || 0) * 1000;
 let idleTimer = null;
 
-/** Don't lock out from under someone mid voice note or mid video. */
+/** Don't lock out from under someone mid voice note, mid video, or mid stream. */
 function mediaBusy() {
   if (rec) return true;
+  // Sharing a screen means sitting and watching, often without touching the
+  // page for minutes. The host has no playing element of their own to catch
+  // below, so check both ends of the stream directly.
+  if (hostStream || guestPc) return true;
   return [...document.querySelectorAll('audio, video')].some((m) => !m.paused && !m.ended);
 }
 

@@ -39,10 +39,10 @@ window.VAMOR_CONFIG = {
   /**
    * Also re-lock after this many seconds of no typing, tapping or scrolling,
    * even with the app open in front of you. 0 turns idle locking off.
-   * Recording and media playback hold it off, so a long voice note or video
-   * won't lock mid-way.
+   * Recording, media playback and screen sharing hold it off, so a long voice
+   * note, a video, or a stream you're watching won't lock mid-way.
    */
-  IDLE_LOCK_SECONDS: 0,
+  IDLE_LOCK_SECONDS: 30,
 
   /**
    * What a notification says. It's the same every time and carries no payload,
