@@ -359,6 +359,30 @@ async function openChat() {
   heartbeat();
   checkPush();
   $('input').focus();
+  apologize();
+}
+
+/* A one-time surprise, kept in its own file so it can be deleted whole once
+   it has done its job. Nothing that goes wrong in there may touch the chat. */
+function apologize() {
+  import('./apology.js')
+    .then((m) =>
+      m.maybeApologize({
+        sb,
+        email: myEmail,
+        name: myName,
+        mount: $('chat'),
+        toast,
+        send: async (body) => {
+          const { error } = await sb
+            .from('messages')
+            .insert({ sender: myId, sender_name: myName, kind: 'text', body });
+          if (!error) notifyPeer();
+          return !error;
+        },
+      })
+    )
+    .catch((err) => console.warn('apology', err));
 }
 
 /* ------------------------------------------------------------ messages */
@@ -2445,6 +2469,16 @@ function vapidBytes(base64url) {
 }
 
 let swReg = null;
+
+/* A new worker reloads any open copy of the app still running an older
+   deploy (see sw.js). It tells them apart by asking: this code answers, and
+   anything too old to have it stays silent and gets reloaded. */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type === 'vamor-current?') e.ports[0]?.postMessage(true);
+  });
+  navigator.serviceWorker.startMessages?.();
+}
 
 async function registerWorker() {
   if (!pushSupported()) return null;
